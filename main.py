@@ -76,7 +76,7 @@ async def main(page: ft.Page):
     async def send_message(e):
         msg = message_input.value
         if msg:
-            await glasses.send_text_to_all(msg)
+            await glasses.send_text(msg)
             log_message(f"Sent message to glasses: {msg}")
             message_input.value = ""
             page.update()

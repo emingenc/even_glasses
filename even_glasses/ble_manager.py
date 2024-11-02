@@ -43,24 +43,14 @@ class Glass:
         self.client = BleakClient(
             address, disconnected_callback=self.handle_disconnection
         )
-        self.uart_tx = None
-        self.uart_rx = None
-        self.heartbeat_seq = 0
-        self.heartbeat_task = None
-        self.evenai_seq = 0
-        self.received_ack = False
-        self.last_device_order = None
-        self.audio_buffer = bytearray()
-        self.audio_params = {"channels": 1, "sampwidth": 2, "framerate": 16000}
-        self.command_handlers: Dict[int, Callable[[bytes], Any]] = {
-            Commands.BLE_REQ_HEARTBEAT: self.handle_heartbeat_response,
-            Commands.BLE_REQ_TRANSFER_MIC_DATA: self.handle_voice_data,
-            Commands.BLE_REQ_EVENAI: self.handle_evenai_response,
-            Commands.BLE_REQ_DEVICE_ORDER: self.handle_device_order,
-            Commands.BLE_REQ_QUICK_NOTE: self.handle_quick_note,
-            Commands.BLE_REQ_DASHBOARD: self.handle_dashboard,
-        }
-        self._ack_event = asyncio.Event()
+        self._uart_tx = None
+        self._uart_rx = None
+        self._heartbeat_seq = 0
+        self._heartbeat_task = None
+        self._evenai_seq = 0
+        self._received_ack = False
+        self._last_device_order = None
+        self.command_handlers: Dict[int, Callable[[bytes], Any]] = {}
 
     async def connect(self):
         """Connect to the glass device."""
@@ -70,11 +60,11 @@ class Glass:
                 logging.info(
                     f"Connected to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-                await self.discover_services()
-                await self.send_init_command()
-                await self.start_notifications()
-                if not self.heartbeat_task or self.heartbeat_task.done():
-                    self.heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+                await self._discover_services()
+                await self._send_init_command()
+                await self._start_notifications()
+                if not self._heartbeat_task or self._heartbeat_task.done():
+                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
             else:
                 logging.error(
@@ -95,20 +85,26 @@ class Glass:
             )
 
         # Stop heartbeat loop
-        if self.heartbeat_task:
+        if self._heartbeat_task:
             logging.info(
                 f"Stopping heartbeat for {self.side.capitalize()} glass: {self.name} ({self.address})."
             )
-            self.heartbeat_task.cancel()  # Cancel the heartbeat task
+            self._heartbeat_task.cancel()  # Cancel the heartbeat task
             try:
-                await self.heartbeat_task  # Await cancellation
+                await self._heartbeat_task  # Await cancellation
             except asyncio.CancelledError:
                 logging.info(
                     f"Heartbeat task cancelled for {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-            self.heartbeat_task = None
+            self._heartbeat_task = None
 
-    async def discover_services(self):
+    def handle_disconnection(self, client: BleakClient):
+        """Handle device disconnection."""
+        logging.warning(
+            f"{self.side.capitalize()} glass disconnected: {self.name} ({self.address})."
+        )
+
+    async def _discover_services(self):
         """Discover UART characteristics."""
         try:
             services = await self.client.get_services()
@@ -116,10 +112,10 @@ class Glass:
                 if service.uuid.lower() == UART_SERVICE_UUID.lower():
                     for char in service.characteristics:
                         if char.uuid.lower() == UART_TX_CHAR_UUID.lower():
-                            self.uart_tx = char.uuid
+                            self._uart_tx = char.uuid
                         elif char.uuid.lower() == UART_RX_CHAR_UUID.lower():
-                            self.uart_rx = char.uuid
-            if not self.uart_tx or not self.uart_rx:
+                            self._uart_rx = char.uuid
+            if not self._uart_tx or not self._uart_rx:
                 logging.error(
                     f"UART characteristics not found for {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
@@ -130,31 +126,18 @@ class Glass:
             )
             await self.disconnect()
 
-    async def send_init_command(self):
+    async def _send_init_command(self):
         """Send initialization command."""
-        if self.uart_tx:
+        if self._uart_tx:
             init_data = bytes([Commands.BLE_REQ_INIT, 0x01])
             try:
-                await self.client.write_gatt_char(self.uart_tx, init_data)
+                await self.client.write_gatt_char(self._uart_tx, init_data)
                 logging.info(
                     f"Sent initialization command to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
             except Exception as e:
                 logging.error(
                     f"Failed to send init command to {self.side.capitalize()} glass ({self.address}): {e}"
-                )
-
-    async def start_notifications(self):
-        """Start notifications on UART RX characteristic."""
-        if self.uart_rx:
-            try:
-                await self.client.start_notify(self.uart_rx, self.handle_notification)
-                logging.info(
-                    f"Subscribed to UART RX notifications for {self.side.capitalize()} glass: {self.name} ({self.address})."
-                )
-            except Exception as e:
-                logging.error(
-                    f"Failed to subscribe to notifications for {self.side.capitalize()} glass ({self.address}): {e}"
                 )
 
     def handle_notification(self, sender, data):
@@ -179,55 +162,6 @@ class Glass:
         handler = self.command_handlers.get(cmd, self.handle_unknown_command)
         await handler(ble_receive)
 
-    # Command Handlers
-    async def handle_heartbeat_response(self, ble_receive: BleReceive):
-        """Handle heartbeat response."""
-        logging.info(
-            f"Heartbeat {self.side.capitalize()} glass: {self.name} ({self.address})."
-        )
-        self.received_ack = True
-
-    async def handle_voice_data(self, ble_receive: BleReceive):
-        """Handle incoming voice data."""
-        logging.info(
-            f"Received voice data from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
-        )
-        self.audio_buffer += ble_receive.data
-        await self.save_audio()
-
-    async def handle_evenai_response(self, ble_receive: BleReceive):
-        """Handle EvenAI response."""
-        logging.info(
-            f"Received EvenAI response from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
-        )
-        self._ack_event.set()
-
-    async def handle_device_order(self, ble_receive: BleReceive):
-        """Handle device order commands."""
-        order = ble_receive.data[0] if ble_receive.data else None
-        self.last_device_order = order
-        logging.info(
-            f"Received device order from {self.side.capitalize()} glass: {self.name} ({self.address}): {hex(order) if order else 'N/A'}"
-        )
-        if order == DeviceOrders.DISPLAY_COMPLETE:
-            self.received_ack = True
-
-    async def handle_quick_note(self, ble_receive: BleReceive):
-        """Handle quick note commands."""
-        logging.info(
-            f"Received quick note from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
-        )
-
-        notesbytes = ble_receive.data
-        logging.info(f"Quick note: {notesbytes}")
-        
-
-    async def handle_dashboard(self, ble_receive: BleReceive):
-        """Handle dashboard commands."""
-        logging.info(
-            f"Received dashboard data from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
-        )
-
     async def handle_unknown_command(self, ble_receive: BleReceive):
         """Handle unknown commands."""
         cmd = ble_receive.cmd
@@ -235,56 +169,42 @@ class Glass:
             f"Unknown command {hex(cmd) if cmd else 'N/A'} from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
         )
 
-    async def save_audio(self):
-        """Save the accumulated audio buffer to a WAV file."""
-        try:
-            if not self.audio_buffer:
-                logging.warning(
-                    f"No audio data to save for {self.side.capitalize()} glass: {self.name} ({self.address})."
+    async def _start_notifications(self):
+        """Start notifications on UART RX characteristic."""
+        if self._uart_rx:
+            try:
+                await self.client.start_notify(self._uart_rx, self.handle_notification)
+                logging.info(
+                    f"Subscribed to UART RX notifications for {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-                return
+            except Exception as e:
+                logging.error(
+                    f"Failed to subscribe to notifications for {self.side.capitalize()} glass ({self.address}): {e}"
+                )
 
-            timestamp = int(time.time())
-            filename = f"{self.name}_{self.address}_audio_{timestamp}.wav"
-
-            with wave.open(filename, "wb") as wf:
-                wf.setnchannels(self.audio_params["channels"])
-                wf.setsampwidth(self.audio_params["sampwidth"])
-                wf.setframerate(self.audio_params["framerate"])
-                wf.writeframes(self.audio_buffer)
-
-            logging.info(
-                f"Saved audio to {filename} for {self.side.capitalize()} glass: {self.name} ({self.address})."
-            )
-            self.audio_buffer = bytearray()
-
-        except Exception as e:
-            logging.error(
-                f"Error saving audio for {self.side.capitalize()} glass ({self.address}): {e}"
-            )
-
-    async def heartbeat_loop(self):
+    async def _heartbeat_loop(self):
         """Send periodic heartbeats to maintain connection."""
         try:
             while self.client.is_connected:
                 try:
+                    length = 6
                     heartbeat_data = struct.pack(
                         "BBBBBB",
                         Commands.BLE_REQ_HEARTBEAT,
-                        6 & 0xFF,  # Length low byte
-                        (6 >> 8) & 0xFF,  # Length high byte
-                        self.heartbeat_seq % 0xFF,  # Sequence number
-                        0x04,  # Status/type indicator
-                        self.heartbeat_seq % 0xFF,  # Sequence number
+                        length & 0xFF,
+                        (length >> 8) & 0xFF,
+                        self._heartbeat_seq % 0xFF,
+                        0x04,
+                        self._heartbeat_seq % 0xFF,
                     )
+                    self._heartbeat_seq += 1
                     await self.client.write_gatt_char(UART_TX_CHAR_UUID, heartbeat_data)
                     logging.debug(
                         f"Sent heartbeat to {self.side.capitalize()} glass: {heartbeat_data.hex()}"
                     )
-                    self.heartbeat_seq += 1
-                    self.received_ack = False
+                    self._received_ack = False
                     await asyncio.sleep(2)
-                    if not self.received_ack:
+                    if not self._received_ack:
                         logging.warning(
                             f"No heartbeat ack from {self.side.capitalize()} glass: {self.name}"
                         )
@@ -294,6 +214,8 @@ class Glass:
                         f"Error during heartbeat with {self.side.capitalize()} glass ({self.address}): {e}"
                     )
                     await self.client.disconnect()
+                    self._heartbeat_task.cancel()
+                    self._heartbeat_task = None
                     break
         except asyncio.CancelledError:
             logging.info(
@@ -301,12 +223,12 @@ class Glass:
             )
             raise  # Re-raise to ensure the task is properly cancelled
 
-    def handle_disconnection(self, client: BleakClient):
-        """Handle device disconnection."""
-        logging.warning(
-            f"{self.side.capitalize()} glass disconnected: {self.name} ({self.address})."
+    async def _handle_heartbeat_response(self, ble_receive: BleReceive):
+        """Handle heartbeat response."""
+        logging.info(
+            f"Heartbeat {self.side.capitalize()} glass: {self.name} ({self.address})."
         )
-        asyncio.create_task(glasses.connect_glass(self))
+        self._received_ack = True
 
     async def send_text(self, text: str, new_screen=1):
         """
@@ -321,7 +243,7 @@ class Glass:
 
         if len(lines) <= 3:
             display_text = "\n\n" + "\n".join(lines)
-            success = await self.send_text_packet(
+            success = await self._send_text_packet(
                 display_text, new_screen, DisplayStatus.NORMAL_TEXT, 1, 1
             )
             if not success:
@@ -329,8 +251,8 @@ class Glass:
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
                 return False
-            await asyncio.sleep(3)
-            success = await self.send_text_packet(
+            await asyncio.sleep(1)
+            success = await self._send_text_packet(
                 display_text, new_screen, DisplayStatus.FINAL_TEXT, 1, 1
             )
             return success
@@ -338,7 +260,7 @@ class Glass:
         elif len(lines) <= 5:
             padding = "\n" if len(lines) == 4 else ""
             display_text = padding + "\n".join(lines)
-            success = await self.send_text_packet(
+            success = await self._send_text_packet(
                 display_text, new_screen, DisplayStatus.NORMAL_TEXT, 1, 1
             )
             if not success:
@@ -346,8 +268,8 @@ class Glass:
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
                 return False
-            await asyncio.sleep(3)
-            success = await self.send_text_packet(
+            await asyncio.sleep(1)
+            success = await self._send_text_packet(
                 display_text, new_screen, DisplayStatus.FINAL_TEXT, 1, 1
             )
             return success
@@ -367,7 +289,7 @@ class Glass:
                     else DisplayStatus.NORMAL_TEXT
                 )
 
-                success = await self.send_text_packet(
+                success = await self._send_text_packet(
                     display_text, new_screen, status, current_page, total_pages
                 )
                 if not success:
@@ -384,7 +306,7 @@ class Glass:
 
             return True
 
-    async def send_text_packet(
+    async def _send_text_packet(
         self,
         text: str,
         new_screen: int,
@@ -405,10 +327,11 @@ class Glass:
         ]
 
         for i, chunk in enumerate(chunks):
+            self._received_ack = False
             header = struct.pack(
                 ">BBBBBBBB",
                 Commands.BLE_REQ_EVENAI,
-                self.evenai_seq % 0xFF,
+                self._evenai_seq % 0xFF,
                 len(chunks),
                 i,
                 status | new_screen,
@@ -418,34 +341,24 @@ class Glass:
             )
             packet = header + bytes([max_pages]) + chunk
 
-            self._ack_event.clear()
-            try:
-                await self.client.write_gatt_char(UART_TX_CHAR_UUID, packet)
-                logging.debug(
-                    f"Sent text packet to {self.side.capitalize()} glass: {packet.hex()}"
-                )
-                self.evenai_seq += 1
-
-                try:
-                    await asyncio.wait_for(self._ack_event.wait(), timeout=4.0)
-                    logging.debug(
-                        f"Received acknowledgment for packet {i} from {self.side.capitalize()} glass."
-                    )
-                except asyncio.TimeoutError:
-                    logging.error(
-                        f"Acknowledgment timeout for packet {i} from {self.side.capitalize()} glass."
-                    )
-                    return False
-
-                await asyncio.sleep(0.1)
-
-            except Exception as e:
-                logging.error(
-                    f"Error sending packet {i} to {self.side.capitalize()} glass: {e}"
-                )
+            await self.client.write_gatt_char(UART_TX_CHAR_UUID, packet)
+            logging.debug(
+                f"Sent text packet to {self.side.capitalize()} glass: {packet.hex()}"
+            )
+            if not await self._wait_for_display_complete(timeout=3.0):
                 return False
+            await asyncio.sleep(0.1)
 
         return True
+
+    async def _wait_for_display_complete(self, timeout=2.0):
+        """Wait for display complete status"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self._received_ack:
+                return True
+            await asyncio.sleep(0.1)
+        return False
 
     def format_text_lines(self, text: str) -> list:
         """Format text into lines that fit the display."""
@@ -465,11 +378,96 @@ class Glass:
         return lines
 
 
+class EvenGlass(Glass):
+    """Represents an EvenGlass device with specific command handlers."""
+
+    def __init__(self, name: str, address: str, side: str):
+        super().__init__(name, address, side)
+        self.audio_buffer = bytearray()
+        self._ack_event = asyncio.Event()
+        self.command_handlers: Dict[int, Callable[[BleReceive], Any]] = {
+            Commands.BLE_REQ_HEARTBEAT: self._handle_heartbeat_response,
+            Commands.BLE_REQ_TRANSFER_MIC_DATA: self.handle_voice_data,
+            Commands.BLE_REQ_EVENAI: self.handle_evenai_response,
+            Commands.BLE_REQ_DEVICE_ORDER: self.handle_device_order,
+            Commands.BLE_REQ_QUICK_NOTE: self.handle_quick_note,
+            Commands.BLE_REQ_DASHBOARD: self.handle_dashboard,
+        }
+
+    # Command Handlers
+    async def handle_voice_data(self, ble_receive: BleReceive):
+        """Handle incoming voice data."""
+        logging.info(
+            f"Received voice data from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
+        self.audio_buffer += ble_receive.data
+        await self.save_audio()
+
+    async def handle_evenai_response(self, ble_receive: BleReceive):
+        """Handle EvenAI response."""
+        logging.info(
+            f"Received EvenAI response from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
+        self._ack_event.set()
+
+    async def handle_device_order(self, ble_receive: BleReceive):
+        """Handle device order commands."""
+        order = ble_receive.data[0] if ble_receive.data else None
+        self._last_device_order = order
+        logging.info(
+            f"Received device order from {self.side.capitalize()} glass: {self.name} ({self.address}): {hex(order) if order else 'N/A'}"
+        )
+        if order == DeviceOrders.DISPLAY_COMPLETE:
+            self._received_ack = True
+
+    async def handle_quick_note(self, ble_receive: BleReceive):
+        """Handle quick note commands."""
+        logging.info(
+            f"Received quick note from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
+        notesbytes = ble_receive.data
+        logging.info(f"Quick note: {notesbytes}")
+
+    async def handle_dashboard(self, ble_receive: BleReceive):
+        """Handle dashboard commands."""
+        logging.info(
+            f"Received dashboard data from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
+
+    async def save_audio(self):
+        """Save the accumulated audio buffer to a WAV file."""
+        try:
+            if not self.audio_buffer:
+                logging.warning(
+                    f"No audio data to save for {self.side.capitalize()} glass: {self.name} ({self.address})."
+                )
+                return
+
+            timestamp = int(time.time())
+            filename = f"{self.name}_{self.address}_audio_{timestamp}.wav"
+
+            with wave.open(filename, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(self.audio_buffer)
+
+            logging.info(
+                f"Saved audio to {filename} for {self.side.capitalize()} glass: {self.name} ({self.address})."
+            )
+            self.audio_buffer = bytearray()
+
+        except Exception as e:
+            logging.error(
+                f"Error saving audio for {self.side.capitalize()} glass ({self.address}): {e}"
+            )
+
+
 class GlassesProtocol:
     """Manages both left and right glasses devices."""
 
     def __init__(self):
-        self.glasses: Dict[str, Glass] = {}  # Keyed by device address
+        self.glasses: Dict[str, EvenGlass] = {}  # Keyed by device address
         self.device_names: Dict[str, str] = {}  # Address -> Name
         self.on_status_changed: Callable[[str, str], None] = lambda addr, status: None
         self.reconnect_attempts: Dict[str, int] = defaultdict(int)
@@ -504,13 +502,13 @@ class GlassesProtocol:
             return
 
         for device in target_devices:
-            glass = Glass(
+            glass = EvenGlass(
                 name=device["name"], address=device["address"], side=device["side"]
             )
             self.glasses[device["address"]] = glass
             asyncio.create_task(self.connect_glass(glass))
 
-    async def connect_glass(self, glass: Glass):
+    async def connect_glass(self, glass: EvenGlass):
         """Connect to a single glass device with reconnection logic."""
         while self.reconnect_attempts[glass.address] < self.max_reconnect_attempts:
             await glass.connect()
@@ -537,7 +535,7 @@ class GlassesProtocol:
             f"Failed to connect to {glass.side.capitalize()} glasses ({glass.address}) after {self.max_reconnect_attempts} attempts."
         )
 
-    async def handle_glass_disconnection(self, glass: Glass):
+    async def handle_glass_disconnection(self, glass: EvenGlass):
         """Handle disconnection and initiate reconnection."""
         address = glass.address
         if (
@@ -555,7 +553,7 @@ class GlassesProtocol:
         task = asyncio.create_task(self.connect_glass(glass))
         self.reconnection_tasks[address] = task
 
-    async def send_text_to_all(self, text: str):
+    async def send_text(self, text: str):
         """Send text message to all connected glasses."""
         tasks = {}
         for glass in self.glasses.values():
@@ -601,7 +599,7 @@ async def main():
 
         while True:
             test_message = "Hello, Glasses!\nThis is a test message.\nEnjoy your day!"
-            await glasses.send_text_to_all(test_message)
+            await glasses.send_text(test_message)
             logging.info("Sent test text message to all glasses.")
             await asyncio.sleep(20)
 
