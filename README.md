@@ -10,6 +10,16 @@ To install the package, use pip:
 pip3 install even_glasses
 ```
 
+## Flet application
+
+```sh
+pip3 install -r requirements.txt
+```
+
+```sh
+flet run
+```
+
 ## Usage
 
 Here is an example of how to use the even_glasses package to control your smart glasses:
@@ -55,6 +65,7 @@ if __name__ == "__main__":
         logging.error(f"Unhandled exception in main: {e}")
 
 ```
+
 
 ## Features
 
