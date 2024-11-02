@@ -5,7 +5,7 @@ from even_glasses.ble_manager import (
 )
 
 
-__version__ = "0.1.03"
+__version__ = "0.1.04"
 
 __all__ = [
     "BleReceive",

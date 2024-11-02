@@ -40,7 +40,7 @@ class Glass:
         self.name = name
         self.address = address
         self.side = side  # 'left' or 'right'
-        self.client = self.client = BleakClient(
+        self.client = BleakClient(
             address, disconnected_callback=self.handle_disconnection
         )
         self.uart_tx = None
@@ -57,8 +57,10 @@ class Glass:
             Commands.BLE_REQ_TRANSFER_MIC_DATA: self.handle_voice_data,
             Commands.BLE_REQ_EVENAI: self.handle_evenai_response,
             Commands.BLE_REQ_DEVICE_ORDER: self.handle_device_order,
+            Commands.BLE_REQ_QUICK_NOTE: self.handle_quick_note,
+            Commands.BLE_REQ_DASHBOARD: self.handle_dashboard,
         }
-        self._ack_event = asyncio.Event()  # Initialize acknowledgment event
+        self._ack_event = asyncio.Event()
 
     async def connect(self):
         """Connect to the glass device."""
@@ -181,7 +183,7 @@ class Glass:
     async def handle_heartbeat_response(self, ble_receive: BleReceive):
         """Handle heartbeat response."""
         logging.info(
-            f"Heartbeat from {self.side.capitalize()} glass: {self.name} ({self.address})."
+            f"Heartbeat {self.side.capitalize()} glass: {self.name} ({self.address})."
         )
         self.received_ack = True
 
@@ -209,6 +211,21 @@ class Glass:
         )
         if order == DeviceOrders.DISPLAY_COMPLETE:
             self.received_ack = True
+
+    async def handle_quick_note(self, ble_receive: BleReceive):
+        """Handle quick note commands."""
+        logging.info(
+            f"Received quick note from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
+
+        notes = ble_receive.data.decode("utf-8")
+        logging.info(f"Quick note: {notes}")
+
+    async def handle_dashboard(self, ble_receive: BleReceive):
+        """Handle dashboard commands."""
+        logging.info(
+            f"Received dashboard data from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
+        )
 
     async def handle_unknown_command(self, ble_receive: BleReceive):
         """Handle unknown commands."""
@@ -248,7 +265,7 @@ class Glass:
     async def heartbeat_loop(self):
         """Send periodic heartbeats to maintain connection."""
         try:
-            while self.client.is_connected and self.heartbeat_task:
+            while self.client.is_connected:
                 try:
                     heartbeat_data = struct.pack(
                         "BBBBBB",
@@ -265,14 +282,11 @@ class Glass:
                     )
                     self.heartbeat_seq += 1
                     self.received_ack = False
-
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(2)
                     if not self.received_ack:
                         logging.warning(
                             f"No heartbeat ack from {self.side.capitalize()} glass: {self.name}"
                         )
-                        await self.client.disconnect()
-                        break
 
                 except Exception as e:
                     logging.error(
@@ -291,13 +305,16 @@ class Glass:
         logging.warning(
             f"{self.side.capitalize()} glass disconnected: {self.name} ({self.address})."
         )
-        # reconnect
         asyncio.create_task(glasses.connect_glass(self))
 
     async def send_text(self, text: str, new_screen=1):
         """
         Send text to display on glass with proper formatting and status transitions.
         """
+        logging.info(
+            f"Sending text to {self.side.capitalize()} glass: {self.name} ({self.address})"
+        )
+
         lines = self.format_text_lines(text)
         total_pages = (len(lines) + 4) // 5  # 5 lines per page
 
@@ -311,6 +328,7 @@ class Glass:
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
                 return False
+            await asyncio.sleep(3)
             success = await self.send_text_packet(
                 display_text, new_screen, DisplayStatus.FINAL_TEXT, 1, 1
             )
@@ -374,6 +392,9 @@ class Glass:
         max_pages: int,
     ) -> bool:
         """Send a single text packet with proper formatting."""
+        logging.info(
+            f"Sending text packet to {self.side.capitalize()} glass: {self.name} ({self.address})"
+        )
         text_bytes = text.encode("utf-8")
         max_chunk_size = 191
 
@@ -405,7 +426,7 @@ class Glass:
                 self.evenai_seq += 1
 
                 try:
-                    await asyncio.wait_for(self._ack_event.wait(), timeout=2.0)
+                    await asyncio.wait_for(self._ack_event.wait(), timeout=4.0)
                     logging.debug(
                         f"Received acknowledgment for packet {i} from {self.side.capitalize()} glass."
                     )
@@ -453,6 +474,9 @@ class GlassesProtocol:
         self.reconnect_attempts: Dict[str, int] = defaultdict(int)
         self.max_reconnect_attempts = 10
         self.reconnect_delay = 2  # Initial delay in seconds
+        self.reconnection_tasks: Dict[
+            str, asyncio.Task
+        ] = {}  # Track reconnection tasks
 
     async def scan_and_connect(self, timeout: int = 10):
         """Scan for glasses devices and connect to them."""
@@ -492,6 +516,9 @@ class GlassesProtocol:
             if glass.client.is_connected:
                 self.reconnect_attempts[glass.address] = 0
                 self.on_status_changed(glass.address, "Connected")
+                # Remove any existing reconnection task
+                if glass.address in self.reconnection_tasks:
+                    del self.reconnection_tasks[glass.address]
                 return
             else:
                 self.reconnect_attempts[glass.address] += 1
@@ -509,26 +536,46 @@ class GlassesProtocol:
             f"Failed to connect to {glass.side.capitalize()} glasses ({glass.address}) after {self.max_reconnect_attempts} attempts."
         )
 
+    async def handle_glass_disconnection(self, glass: Glass):
+        """Handle disconnection and initiate reconnection."""
+        address = glass.address
+        if (
+            address in self.reconnection_tasks
+            and not self.reconnection_tasks[address].done()
+        ):
+            logging.info(
+                f"Reconnection task already running for {glass.side.capitalize()} glasses ({address})."
+            )
+            return
+
+        logging.info(
+            f"Initiating reconnection for {glass.side.capitalize()} glasses ({address})."
+        )
+        task = asyncio.create_task(self.connect_glass(glass))
+        self.reconnection_tasks[address] = task
+
     async def send_text_to_all(self, text: str):
         """Send text message to all connected glasses."""
-        tasks = []
+        tasks = {}
         for glass in self.glasses.values():
             if glass.client.is_connected:
-                tasks.append(glass.send_text(text))
+                tasks[glass.address] = asyncio.create_task(glass.send_text(text))
             else:
                 logging.warning(
                     f"{glass.side.capitalize()} glasses ({glass.name} - {glass.address}) are not connected."
                 )
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for glass, result in zip(self.glasses.values(), results):
-            if isinstance(result, Exception):
-                logging.error(
-                    f"Error sending text to {glass.side.capitalize()} glasses ({glass.address}): {result}"
-                )
-            else:
-                logging.info(
-                    f"Send text to {glass.side.capitalize()} glasses ({glass.address}) {'succeeded' if result else 'failed'}."
-                )
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for addr, result in zip(tasks.keys(), results):
+            glass = self.glasses.get(addr)
+            if glass:
+                if isinstance(result, Exception):
+                    logging.error(
+                        f"Error sending text to {glass.side.capitalize()} glasses ({glass.address}): {result}"
+                    )
+                else:
+                    logging.info(
+                        f"Send text to {glass.side.capitalize()} glasses ({glass.address}) {'succeeded' if result else 'failed'}."
+                    )
 
     async def graceful_shutdown(self):
         """Disconnect from all glasses gracefully."""

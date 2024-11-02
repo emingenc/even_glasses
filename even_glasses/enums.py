@@ -15,6 +15,12 @@ class Commands(IntEnum):
     BLE_REQ_FINAL_TEXT = 0x40
     BLE_REQ_MANUAL_PAGE = 0x50
     BLE_REQ_ERROR_TEXT = 0x60
+    
+    # Quick note commands
+    BLE_REQ_QUICK_NOTE = 0x21
+    
+    # Dashboard commands
+    BLE_REQ_DASHBOARD = 0x22
 
 
 class DeviceOrders(IntEnum):
