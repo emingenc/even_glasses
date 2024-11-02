@@ -219,10 +219,7 @@ class Glass:
         )
 
         notesbytes = ble_receive.data
-        # save audio
-        self.audio_buffer += notesbytes
-        await self.save_audio()
-        self.audio_buffer = bytearray()
+        logging.info(f"Quick note: {notesbytes}")
         
 
     async def handle_dashboard(self, ble_receive: BleReceive):
