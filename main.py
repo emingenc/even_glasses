@@ -1,5 +1,5 @@
 import flet as ft
-from even_glasses import GlassesProtocol  # Adjust the import as necessary
+from even_glasses import GlassesProtocol
 
 glasses = GlassesProtocol()
 
