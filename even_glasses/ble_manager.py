@@ -218,8 +218,12 @@ class Glass:
             f"Received quick note from {self.side.capitalize()} glass: {self.name} ({self.address}): {ble_receive.data.hex()}"
         )
 
-        notes = ble_receive.data.decode("utf-8")
-        logging.info(f"Quick note: {notes}")
+        notesbytes = ble_receive.data
+        # save audio
+        self.audio_buffer += notesbytes
+        await self.save_audio()
+        self.audio_buffer = bytearray()
+        
 
     async def handle_dashboard(self, ble_receive: BleReceive):
         """Handle dashboard commands."""
