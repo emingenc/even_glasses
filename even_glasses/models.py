@@ -1,4 +1,5 @@
 from enum import IntEnum
+from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from typing import Literal
 from datetime import datetime
@@ -34,11 +35,10 @@ class StartEvenAISubCMD(IntEnum):
     PAGE_CONTROL = 0x01  # Page up/down control in manual mode
     START = 0x17  # Start Even AI
     STOP = 0x18  # Stop Even AI recording
-    
+
     # 3, 31
-    DASHBOARD_RIGHT = 0x03 # 3 in hex is 0x03
-    DASHBOARD2 = 0x1F # 31 in hex is 0x1F
-    
+    DASHBOARD_RIGHT = 0x03  # 3 in hex is 0x03
+    DASHBOARD2 = 0x1F  # 31 in hex is 0x1F
 
 
 class MicEnableStatus(IntEnum):
@@ -164,3 +164,12 @@ def create_notification(msg_id, app_identifier, title, subtitle, message, displa
         )
     )
     return notification
+
+
+@dataclass
+class RSVPConfig:
+    words_per_group: int = 1
+    wpm: int = 250
+    padding_char: str = "..."
+    max_retries: int = 3
+    retry_delay: float = 0.5

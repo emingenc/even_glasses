@@ -2,7 +2,7 @@ import asyncio
 import logging
 from bleak import BleakClient, BleakScanner
 from collections import defaultdict
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, List
 import sys
 import time
 import struct
@@ -18,6 +18,7 @@ from even_glasses.models import (
     ScreenAction,
     SendAIResult,
     Notification,
+    RSVPConfig,
     create_notification,
 )
 from even_glasses.service_identifiers import (
@@ -249,7 +250,6 @@ class Glass:
                 logging.error(
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-            await asyncio.sleep(1)
             success = await self._send_text_packet(
                 display_text, new_screen, EvenAIStatus.DISPLAY_COMPLETE, 1, 1
             )
@@ -266,7 +266,6 @@ class Glass:
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
 
-            await asyncio.sleep(1)
             success = await self._send_text_packet(
                 display_text, new_screen, EvenAIStatus.DISPLAY_COMPLETE, 1, 1
             )
@@ -349,11 +348,10 @@ class Glass:
             packet = header + bytes([ai_result.max_page_num]) + chunk
 
             await self.send_command(packet)
-            await asyncio.sleep(0.1)
             logging.debug(
                 f"Sent text packet to {self.side.capitalize()} glass: {packet.hex()}"
             )
-            if not await self._wait_for_display_complete(timeout=3.0):
+            if not await self._wait_for_display_complete(timeout=0.1):
                 return False
 
         return True
@@ -364,7 +362,7 @@ class Glass:
         while time.time() - start_time < timeout:
             if self._received_ack:
                 return True
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
         return False
 
     def format_text_lines(self, text: str) -> list:
@@ -578,7 +576,8 @@ class EvenGlass(Glass):
         for chunk in notification_chunks:
             await self.send_command(chunk)
             print(f"Sent chunk to {self.side}: {chunk.hex()}")
-            await asyncio.sleep(0.1)  # Small delay between chunks
+            await asyncio.sleep(0.01)  # Small delay between chunks
+
 
 
 class GlassesProtocol:
@@ -594,6 +593,7 @@ class GlassesProtocol:
         self.reconnection_tasks: Dict[
             str, asyncio.Task
         ] = {}  # Track reconnection tasks
+        self._write_lock = asyncio.Semaphore(1) 
 
     async def scan_and_connect(self, timeout: int = 10):
         """Scan for glasses devices and connect to them."""
@@ -631,7 +631,7 @@ class GlassesProtocol:
         while self.reconnect_attempts[glass.address] < self.max_reconnect_attempts:
             await glass.connect()
             if glass.client.is_connected:
-                await asyncio.sleep(1)
+                await asyncio.sleep(3)
                 self.reconnect_attempts[glass.address] = 0
                 self.on_status_changed(glass.address, "Connected")
                 # Remove any existing reconnection task
@@ -706,6 +706,72 @@ class GlassesProtocol:
                 logging.warning(
                     f"{glass.side.capitalize()} glasses ({glass.name} - {glass.address}) are not connected."
                 )
+    
+    async def _safe_send_text(self, text: str, retries: int = 3) -> bool:
+        """Send text with retry mechanism and write lock"""
+        async with self._write_lock:
+            for attempt in range(retries):
+                try:
+                    await self.send_text(text)
+                    return True
+                except Exception as e:
+                    if attempt == retries - 1:
+                        logging.error(f"Failed to send text after {retries} attempts: {e}")
+                        return False
+                    await asyncio.sleep(0.01 * (attempt + 1))  # Exponential backoff
+        return False
+
+    def _group_words(self, words: List[str], config: RSVPConfig) -> List[str]:
+        """Group words according to configuration"""
+        groups = []
+        for i in range(0, len(words), config.words_per_group):
+            group = words[i:i + config.words_per_group]
+            if len(group) < config.words_per_group:
+                group.extend([config.padding_char] * (config.words_per_group - len(group)))
+            groups.append(" ".join(group))
+        return groups
+
+    async def send_rsvp(self, text: str, config: RSVPConfig):
+        """Display text using RSVP method with improved error handling"""
+        if not text:
+            logging.warning("Empty text provided")
+            return False
+
+        try:
+            delay = 60.0 / config.wpm
+            words = text.split()
+            if not words:
+                logging.warning("No words to display after splitting")
+                return False
+
+            # Add padding groups for initial display
+            padding_groups = [""] * (config.words_per_group - 1)
+            word_groups = padding_groups + self._group_words(words, config)
+
+            for group in word_groups:
+                if not group:  # Skip empty padding groups
+                    await asyncio.sleep(delay * config.words_per_group)
+                    continue
+
+                success = await self._safe_send_text(group, config.max_retries)
+                if not success:
+                    logging.error(f"Failed to display group: {group}")
+                    return False
+                
+                await asyncio.sleep(delay * config.words_per_group)
+
+            # Clear display
+            await self._safe_send_text("", config.max_retries)
+            return True
+
+        except asyncio.CancelledError:
+            logging.info("RSVP display cancelled")
+            await self._safe_send_text("")  # Clear display on cancellation
+            raise
+        except Exception as e:
+            logging.error(f"Error in RSVP display: {e}")
+            await self._safe_send_text("")  # Try to clear display
+            return False
 
     async def graceful_shutdown(self):
         """Disconnect from all glasses gracefully."""

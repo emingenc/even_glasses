@@ -10,6 +10,7 @@ from even_glasses.models import (
     EvenAIStatus,
     Notification,
     NCSNotification,
+    RSVPConfig,
 )
 
 
@@ -25,4 +26,5 @@ __all__ = [
     "EvenAIStatus",
     "Notification",
     "NCSNotification",
+    "RSVPConfig",
 ]
