@@ -13,6 +13,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         'bleak>=0.22.3',
+        'lc3 @ git+https://github.com/google/liblc3.git',
+        
     ],
     classifiers=[
         'Programming Language :: Python :: 3',

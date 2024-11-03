@@ -2,14 +2,16 @@ import json
 import flet as ft
 from even_glasses import GlassesProtocol
 from even_glasses import Notification, NCSNotification
-import asyncio
 
 glasses = GlassesProtocol()
+
 
 async def main(page: ft.Page):
     page.title = "Glasses Control Panel"
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
-    page.vertical_alignment = ft.MainAxisAlignment.START  # Changed to START for better layout
+    page.vertical_alignment = (
+        ft.MainAxisAlignment.START
+    )  # Changed to START for better layout
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO  # Enable page-wide scrolling
 
@@ -24,14 +26,24 @@ async def main(page: ft.Page):
     send_button = ft.ElevatedButton(text="Send Message", disabled=True)
 
     # New Notification Input Fields
-    msg_id_input = ft.TextField(label="Message ID", width=200)
-    title_input = ft.TextField(label="Title", width=400)
-    subtitle_input = ft.TextField(label="Subtitle", width=400)
-    notification_message_input = ft.TextField(label="Notification Message", width=400, multiline=True)
-    display_name_input = ft.TextField(label="Display Name", width=400)
+    msg_id_input = ft.TextField(label="Message ID", width=200, value="1")
+    app_identifier_field = ft.TextField(
+        label="App Identifier", width=400, value="org.telegram.messenger"
+    )
+    title_input = ft.TextField(label="Title", width=400, value="Message")
+    subtitle_input = ft.TextField(label="Subtitle", width=400, value="John Doe")
+    notification_message_input = ft.TextField(
+        label="Notification Message",
+        width=400,
+        multiline=True,
+        value="You have a new message from John Doe.",
+    )
+    display_name_input = ft.TextField(label="Display Name", width=400, value="Telegram")
 
     # New Send Notification Button
-    send_notification_button = ft.ElevatedButton(text="Send Notification", disabled=True)
+    send_notification_button = ft.ElevatedButton(
+        text="Send Notification", disabled=True
+    )
 
     connect_button = ft.ElevatedButton(text="Connect to Glasses")
     disconnect_button = ft.ElevatedButton(text="Disconnect Glasses", visible=False)
@@ -100,6 +112,7 @@ async def main(page: ft.Page):
     async def send_custom_notification(e):
         try:
             msg_id = int(msg_id_input.value)
+            app_identifier = app_identifier_field.value
             title = title_input.value
             subtitle = subtitle_input.value
             message = notification_message_input.value
@@ -108,24 +121,21 @@ async def main(page: ft.Page):
             notification = Notification(
                 ncs_notification=NCSNotification(
                     msg_id=msg_id,
-                    app_identifier="your_app_identifier",
+                    app_identifier=app_identifier,
                     title=title,
                     subtitle=subtitle,
                     message=message,
-                    display_name=display_name
+                    display_name=display_name,
                 ),
-                type="Add"
+                type="Add",
             )
 
             await glasses.send_notification(notification)
-            log_message(f"Sent notification: {json.dumps(notification.model_dump(by_alias=True), separators=(',', ':')) }")
+            log_message(
+                f"Sent notification: {json.dumps(notification.model_dump(by_alias=True), separators=(',', ':')) }"
+            )
 
             # Clear input fields after sending
-            msg_id_input.value = ""
-            title_input.value = ""
-            subtitle_input.value = ""
-            notification_message_input.value = ""
-            display_name_input.value = ""
             page.update()
         except ValueError:
             log_message("Invalid Message ID. Please enter a numeric value.")
@@ -158,9 +168,16 @@ async def main(page: ft.Page):
                     spacing=20,
                 ),
                 ft.Divider(),
-                ft.Text(value="Send Custom Notification", size=18, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    value="Send Custom Notification", size=18, weight=ft.FontWeight.BOLD
+                ),
                 ft.Row(
                     [msg_id_input],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=20,
+                ),
+                ft.Row(
+                    [app_identifier_field],
                     alignment=ft.MainAxisAlignment.CENTER,
                     spacing=20,
                 ),
@@ -201,6 +218,7 @@ async def main(page: ft.Page):
             expand=True,
         )
     )
+
 
 if __name__ == "__main__":
     ft.app(target=main)

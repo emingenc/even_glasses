@@ -6,15 +6,16 @@ import time
 
 
 class DeviceOrders(IntEnum):
-    DISPLAY_READY = 0x00
-    DISPLAY_BUSY = 0x11
-    DISPLAY_UPDATE = 0x0F
-    DISPLAY_COMPLETE = 0x09
+    DISPLAY_READY = 0x00  # 0
+    DISPLAY_BUSY = 0x11  # 17
+    DISPLAY_UPDATE = 0x0F  # 15
+    DISPLAY_COMPLETE = 0x09  # 9
 
 
 class CMD(IntEnum):
     START_EVEN_AI = 0xF5
     OPEN_GLASSES_MIC = 0x0E
+    MIC_RESPONSE = 0xE
     RECEIVE_GLASSES_MIC_DATA = 0xF1
 
     # System commands
@@ -33,16 +34,21 @@ class StartEvenAISubCMD(IntEnum):
     PAGE_CONTROL = 0x01  # Page up/down control in manual mode
     START = 0x17  # Start Even AI
     STOP = 0x18  # Stop Even AI recording
+    
+    # 3, 31
+    DASHBOARD_RIGHT = 0x03 # 3 in hex is 0x03
+    DASHBOARD2 = 0x1F # 31 in hex is 0x1F
+    
 
 
 class MicEnableStatus(IntEnum):
-    DISABLE = 0x00
     ENABLE = 0x01
+    DISABLE = 0x00
 
 
 class ResponseStatus(IntEnum):
-    SUCCESS = 0xC9 # 201
-    FAILURE = 0xCA # 202
+    SUCCESS = 0xC9  # 201
+    FAILURE = 0xCA  # 202
 
 
 class ScreenAction(IntEnum):
@@ -107,28 +113,44 @@ class SendAIResult(BaseModel):
         Combines ScreenAction and EvenAIStatus into a single byte for the newscreen field.
         """
         self.newscreen = screen_action.value | even_ai_status.value
- 
+
 
 class NCSNotification(BaseModel):
     msg_id: int = Field(..., alias="msg_id", description="Message ID")
     type: int = Field(1, alias="type", description="Notification type")
-    app_identifier: str = Field(..., alias="app_identifier", description="App identifier")
+    app_identifier: str = Field(
+        ..., alias="app_identifier", description="App identifier"
+    )
     title: str = Field(..., alias="title", description="Notification title")
     subtitle: str = Field(..., alias="subtitle", description="Notification subtitle")
     message: str = Field(..., alias="message", description="Notification message")
-    time_s: int = Field(default_factory=lambda: int(time.time()), alias="time_s", description="Current time in seconds since the epoch")
-    date: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"), alias="date", description="Current date and time")
+    time_s: int = Field(
+        default_factory=lambda: int(time.time()),
+        alias="time_s",
+        description="Current time in seconds since the epoch",
+    )
+    date: str = Field(
+        default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        alias="date",
+        description="Current date and time",
+    )
     display_name: str = Field(..., alias="display_name", description="Display name")
 
-    class Config:
-        allow_population_by_field_name = True
+    class ConfigDict:
+        populate_by_name = True
+
 
 class Notification(BaseModel):
-    ncs_notification: NCSNotification = Field(..., alias="ncs_notification", description="NCS Notification details")
-    type: Literal["Add"] = Field("Add", alias="type", description="Type of notification")   # noqa: F821
+    ncs_notification: NCSNotification = Field(
+        ..., alias="ncs_notification", description="NCS Notification details"
+    )
+    type: Literal["Add"] = Field(
+        "Add", alias="type", description="Type of notification"
+    )  # noqa: F821
 
-    class Config:
-        allow_population_by_field_name = True
+    class ConfigDict:
+        populate_by_name = True
+
 
 def create_notification(msg_id, app_identifier, title, subtitle, message, display_name):
     notification = Notification(
@@ -138,8 +160,7 @@ def create_notification(msg_id, app_identifier, title, subtitle, message, displa
             title=title,
             subtitle=subtitle,
             message=message,
-            display_name=display_name
+            display_name=display_name,
         )
     )
     return notification
-

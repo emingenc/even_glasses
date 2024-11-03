@@ -7,20 +7,19 @@ import sys
 import time
 import struct
 import json
+import wave
+from lc3 import Decoder
 
 from datetime import datetime
 
 from even_glasses.models import (
-    DeviceOrders,
     CMD,
     EvenAIStatus,
     StartEvenAI,
     StartEvenAISubCMD,
     MicEnableStatus,
-    ResponseStatus,
     ScreenAction,
     SendAIResult,
-    OpenGlassesMic,
     Notification,
     create_notification,
 )
@@ -68,6 +67,7 @@ class Glass:
         self._last_device_order = None
         self.recieved_command_handlers: Dict[int, Callable[[bytes], Any]] = {
             CMD.BLE_REQ_HEARTBEAT: self._handle_heartbeat_response,
+            CMD.BLE_REQ_INIT: self._handle_init_response,
         }
 
     async def connect(self):
@@ -155,6 +155,12 @@ class Glass:
         """Send initialization command."""
         init_data = bytes([CMD.BLE_REQ_INIT, 0x01])
         await self.send_command(init_data)
+
+    async def _handle_init_response(self, ble_receive: BleReceive):
+        """Handle init response."""
+        subcommand = ble_receive.data[0]
+        response = "SUCCESS" if subcommand == 201 else "FAILURE"
+        logging.info(f"Init response: {response}")
 
     def handle_notification(self, sender, data):
         """Handle incoming notifications."""
@@ -407,10 +413,11 @@ class EvenGlass(Glass):
 
     def __init__(self, name: str, address: str, side: str):
         super().__init__(name, address, side)
-        self.audio_buffer = bytearray()
+        self.audio_buffer = []  # List of (seq, audio_data) tuples
         self._ack_event = asyncio.Event()
         recive_handlers = {
             CMD.RECEIVE_GLASSES_MIC_DATA: self._handle_receive_mic_data,
+            CMD.MIC_RESPONSE: self._handle_mic_response,
             CMD.BLE_REQ_QUICK_NOTE: self._handle_quick_note,
             CMD.BLE_REQ_DASHBOARD: self._handle_dashboard,
             CMD.START_EVEN_AI: self.even_ai_control,
@@ -419,20 +426,57 @@ class EvenGlass(Glass):
         }
         self.recieved_command_handlers.update(recive_handlers)
 
-    # Receive command handlers
     async def _handle_receive_mic_data(self, ble_receive: BleReceive):
-        """Handle received mic data."""
+        """Handle received mic data by storing as tuples and sorting later."""
+        if len(ble_receive.data) < 2:
+            logging.error("Received data is too short to contain seq and audio data.")
+            return
+
         seq = ble_receive.data[0]
         audio_data = ble_receive.data[1:]
         logging.debug(
-            f"Received mic data from {self.side.capitalize()} glasses ({self.address}): {audio_data.hex()}"
+            f"Received mic data from {self.side.capitalize()} glasses: Seq={seq}, Data={audio_data.hex()}"
         )
-        self.audio_buffer.extend(audio_data)
-        if seq == 0xFF:
-            logging.info(
-                f"Received complete audio data from {self.side.capitalize()} glasses ({self.address})."
-            )
-            self.audio_buffer.clear()
+
+        # Append as a tuple (seq, audio_data)
+        self.audio_buffer.append((seq, audio_data))
+
+    def sort_audio_buffer(self):
+        """Sort the audio buffer based on sequence numbers, handling wrap-around."""
+        if not self.audio_buffer:
+            logging.warning("Audio buffer is empty; nothing to sort.")
+            return
+
+        # Sort based on sequence number with wrap-around consideration
+        self.audio_buffer.sort(key=lambda x: x[0])
+
+        # Optional: Handle missing or out-of-order packets here
+        
+    def get_ordered_audio_data(self) -> bytes:
+        """Retrieve and concatenate sorted audio data."""
+        self.sort_audio_buffer()
+
+        # Extract audio_data from sorted tuples
+        ordered_data = b''.join([data for _, data in self.audio_buffer])
+
+        # Clear the buffer after processing
+        self.audio_buffer.clear()
+        self.audio_buffer = []
+
+        return ordered_data
+
+    async def _handle_mic_response(self, ble_receive: BleReceive):
+        """Handle mic response."""
+        logging.info(
+            f"Received mic response from {self.side.capitalize()} glasses ({self.address})."
+        )
+        # Implement mic response handling here
+
+        cmd = ble_receive.cmd
+        subcommand = ble_receive.data[0]
+        # res = ResponseStatus(subcommand)
+        response = "SUCCESS" if subcommand == 0xC9 else "FAILURE"
+        logging.info(f"MIC response: {response}")
 
     async def _handle_quick_note(self, ble_receive: BleReceive):
         """Handle quick note command."""
@@ -454,10 +498,10 @@ class EvenGlass(Glass):
         cmd = ble_receive.cmd
         subcmd = ble_receive.data[0]
         param = ble_receive.data[1:]
-        logging.info(f"Even AI control command: {cmd}, {subcmd}, {param}")
 
         async def start_even_ai(ble_receive: BleReceive):
             logging.info("Start Even AI")
+            await self.open_mic()
             # Implement start Even AI logic here
 
         async def stop_even_ai(ble_receive: BleReceive):
@@ -470,6 +514,8 @@ class EvenGlass(Glass):
 
         async def exit_even_ai(ble_receive: BleReceive):
             logging.info("Exit Even AI")
+            await self.close_mic()
+            await self.save_audio_data()
             # Implement exit Even AI logic here
 
         if subcmd in StartEvenAISubCMD:
@@ -490,6 +536,18 @@ class EvenGlass(Glass):
             elif subcmd == StartEvenAISubCMD.EXIT:
                 await exit_even_ai(ble_receive)
 
+            elif subcmd == StartEvenAISubCMD.DASHBOARD_RIGHT:
+                logging.info("DASHBOARD_RIGHT")
+                logging.info(f"Device {self.side.capitalize()} glasses")
+                logging.info(f"Even AI control command: {even_ai.model_dump_json()}")
+            elif subcmd == StartEvenAISubCMD.DASHBOARD2:
+                logging.info("Dashboard2")
+                logging.info(f"Device {self.side.capitalize()} glasses")
+                logging.info(f"Even AI control command: {even_ai.model_dump_json()}")
+            else:
+                logging.info(f"Device {self.side.capitalize()} glasses")
+                logging.info(f"Even AI control command: {cmd}, {subcmd}, {param}")
+
     async def _handle_send_ai_result(self, ble_receive: BleReceive):
         """Handle AI result command."""
         logging.info(
@@ -498,9 +556,9 @@ class EvenGlass(Glass):
         # Implement AI result handling here
         ble_receive
         subcommand = ble_receive.data[0]
-        res = ResponseStatus(subcommand)
+        # res = ResponseStatus(subcommand)
 
-        logging.info(f"AI result response: {res}")
+        logging.info(f"AI result response: {subcommand}")
 
     async def _handle_notification_response(self, ble_receive: BleReceive):
         """Handle notification response."""
@@ -515,21 +573,76 @@ class EvenGlass(Glass):
         logging.info(f"Notification response: {subcommand}")
 
     async def open_mic(self):
-        """Open or close the mic."""
-        cmd = OpenGlassesMic(enable=MicEnableStatus.ENABLE)
-        await self.send_command(cmd.model_dump_json().encode("utf-8"))
+        """Open the mic."""
+        await self.send_command(bytes([CMD.OPEN_GLASSES_MIC, MicEnableStatus.ENABLE]))
+        
 
     async def close_mic(self):
         """Close the mic."""
-        cmd = OpenGlassesMic(enable=MicEnableStatus.DISABLE)
-        await self.send_command(cmd.model_dump_json().encode("utf-8"))
+        await self.send_command(bytes([CMD.OPEN_GLASSES_MIC, MicEnableStatus.DISABLE]))
 
-    async def send_notification(
-        self,
-        notification: Notification,
-    ):
-        # Serialize JSON without spaces using json.dumps and model_dump
-        
+    async def save_audio_data(self):
+        """Save and decode audio data to WAV file."""
+        audio_data = self.get_ordered_audio_data()
+        if audio_data:
+            # LC3 decoding parameters
+            sample_rate = 16000  # Ensure this matches your audio source
+            num_channels = 1     # Mono audio
+            frame_duration = 10  # Frame duration in milliseconds
+
+            try:
+                decoder = Decoder(
+                    nchannels=num_channels,
+                    samplerate=sample_rate,
+                    frame_duration=frame_duration,
+                )
+                logging.info("Decoder initialized successfully.")
+            except Exception as e:
+                logging.error(f"Failed to initialize Decoder: {e}")
+                return
+
+            pcm_data = bytearray()
+            
+            # frames based on frame duration 10 frame per chunk
+            frame_chunks = [  audio_data[i:i+320] for i in range(0, len(audio_data), 320) ]
+            logging.info(f"Frame chunks: {len(frame_chunks)}")
+            
+            # Process each frame in the audio buffer
+            for idx, frame in enumerate(frame_chunks):
+                logging.debug(f"Decoding frame {idx+1}/{len(audio_data)}")
+                logging.debug(f"Frame size: {len(frame)} bytes")
+                try:
+                    decoded_frame = decoder.decode(data=frame,bitdepth=16)
+                    pcm_data += decoded_frame
+                    logging.debug(f"Frame {idx+1} decoded successfully.")
+                except ValueError as e:
+                    logging.error(f"Failed to decode frame {idx+1}: {e}")
+                    logging.debug(f"Frame data: {frame}")
+                    logging.debug(f"Decoder parameters: nchannels={num_channels}, "
+                                f"samplerate={sample_rate}, frame_duration={frame_duration}, bitdepth=16")
+                    return
+                except Exception as e:
+                    logging.error(f"Unexpected error decoding frame {idx+1}: {e}")
+                    return
+
+            # Save the PCM data to a WAV file
+            wav_filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+
+            try:
+                with wave.open(wav_filename, "wb") as wf:
+                    wf.setnchannels(num_channels)
+                    wf.setsampwidth(2)  # 8-bit audio
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(pcm_data)
+                await asyncio.sleep(0.5)
+                logging.info(f"Saved audio data to {wav_filename}.")
+            except Exception as e:
+                logging.error(f"Failed to write WAV file: {e}")
+            
+        else:
+            logging.warning("Audio buffer is empty; no data to save.")
+
+    async def construct_notification(self, notification: Notification):
         json_str = json.dumps(
             notification.model_dump(by_alias=True), separators=(",", ":")
         )
@@ -544,9 +657,9 @@ class EvenGlass(Glass):
         ]
 
         total_chunks = len(chunks)
+        encoded_chunks = []
         for index, chunk in enumerate(chunks):
-            # notifyId = 0 for first message, 1 for subsequent messages
-            notify_id = 0 if index == 0 else 1
+            notify_id = 0
 
             # Construct the header matching the debug output
             header = bytes([CMD.NOTIFICATION, notify_id, total_chunks, index])
@@ -555,8 +668,20 @@ class EvenGlass(Glass):
             print(f"Header Bytes: {[hex(b) for b in header]}")
 
             encoded_chunk = header + chunk
-            await self.send_command(encoded_chunk)
-            await asyncio.sleep(0.1)
+            encoded_chunks.append(encoded_chunk)
+        return encoded_chunks
+
+    async def send_notification(
+        self,
+        notification: Notification,
+    ):
+        # Serialize JSON without spaces using json.dumps and model_dump
+
+        notification_chunks = await self.construct_notification(notification)
+        for chunk in notification_chunks:
+            await self.send_command(chunk)
+            print(f"Sent chunk to {self.side}: {chunk.hex()}")
+            await asyncio.sleep(0.1)  # Small delay between chunks
 
 
 class GlassesProtocol:
@@ -713,7 +838,7 @@ async def main():
             await asyncio.sleep(20)
             notification = create_notification(
                 msg_id=1,
-                app_identifier="com.example.app",
+                app_identifier="org.telegram.messenger",
                 title="Notification Title",
                 subtitle="Notification Subtitle",
                 message="This is a test notification message.",
