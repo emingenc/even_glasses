@@ -8,7 +8,6 @@ import time
 import struct
 import json
 
-from datetime import datetime
 
 from even_glasses.models import (
     CMD,
@@ -80,8 +79,7 @@ class Glass:
                 await self._discover_services()
                 await self.send_init_command()
                 await self._start_notifications()
-                if not self._heartbeat_task:
-                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
             else:
                 logging.error(
@@ -120,6 +118,7 @@ class Glass:
         logging.warning(
             f"{self.side.capitalize()} glass disconnected: {self.name} ({self.address})."
         )
+        asyncio.create_task(self.connect())
 
     async def _discover_services(self):
         """Discover UART characteristics."""
@@ -192,25 +191,11 @@ class Glass:
 
     async def _start_notifications(self):
         """Start notifications on UART RX characteristic."""
-        try:
-            await self.client.start_notify(self._uart_rx, self.handle_notification)
-            logging.info(
-                f"Subscribed to UART RX notifications for {self.side.capitalize()} glass: {self.name} ({self.address})."
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to subscribe to notifications for {self.side.capitalize()} glass ({self.address}): {e}"
-            )
-            
-    async def _wait_for_ack (self, timeout=1.0):
-        """Wait for acknowledgment."""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self._received_ack:
-                return True
-            await asyncio.sleep(0.1)
-        return False
-    
+        await self.client.start_notify(self._uart_rx, self.handle_notification)
+        logging.info(
+            f"Subscribed to UART RX notifications for {self.side.capitalize()} glass: {self.name} ({self.address})."
+        )
+
     async def _heartbeat(self):
         """Send a single heartbeat."""
         length = 6
@@ -225,22 +210,20 @@ class Glass:
         )
         self._heartbeat_seq += 1
         await self.send_command(heartbeat_data)
-        logging.debug(
+        logging.info(
             f"Sent heartbeat to {self.side.capitalize()} glass: {heartbeat_data.hex()}"
         )
-        
+
     async def _heartbeat_loop(self):
         """Send periodic heartbeats to maintain connection."""
         frequency = 5.0  # Heartbeat frequency in seconds
         while self.client.is_connected:
             current_time = time.time()
-            if  current_time - self._last_heartbeat_time > frequency:
+            if current_time - self._last_heartbeat_time > frequency:
                 self._last_heartbeat_time = current_time
                 await self._heartbeat()
-        
         self._heartbeat_task.cancel()  # Cancel the heartbeat task
         self._heartbeat_task = None
-
 
     async def _handle_heartbeat_response(self, ble_receive: BleReceive):
         """Handle heartbeat response."""
@@ -283,7 +266,7 @@ class Glass:
                 logging.error(
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-                return False
+
             await asyncio.sleep(1)
             success = await self._send_text_packet(
                 display_text, new_screen, EvenAIStatus.DISPLAY_COMPLETE, 1, 1
@@ -302,7 +285,6 @@ class Glass:
                 status = (
                     EvenAIStatus.DISPLAYING if is_last_page else EvenAIStatus.DISPLAYING
                 )
-
                 success = await self._send_text_packet(
                     display_text, new_screen, status, current_page, total_pages
                 )
@@ -310,7 +292,6 @@ class Glass:
                     logging.error(
                         f"Failed to send page {current_page} to {self.side.capitalize()} glass: {self.name} ({self.address})."
                     )
-                    return False
 
                 if not is_last_page:
                     await asyncio.sleep(5)
@@ -369,12 +350,12 @@ class Glass:
             packet = header + bytes([ai_result.max_page_num]) + chunk
 
             await self.send_command(packet)
+            await asyncio.sleep(0.1)
             logging.debug(
                 f"Sent text packet to {self.side.capitalize()} glass: {packet.hex()}"
             )
             if not await self._wait_for_display_complete(timeout=3.0):
                 return False
-            await asyncio.sleep(0.1)
 
         return True
 
@@ -426,7 +407,6 @@ class EvenGlass(Glass):
     # Receive command handlers
     async def _handle_receive_mic_data(self, ble_receive: BleReceive):
         """Handle received mic data."""
-        seq = ble_receive.data[0]
         audio_data = ble_receive.data[1:]
         logging.debug(
             f"Received mic data from {self.side.capitalize()} glasses] {audio_data.hex()}"
@@ -440,7 +420,6 @@ class EvenGlass(Glass):
         )
         # Implement mic response handling here
 
-        cmd = ble_receive.cmd
         subcommand = ble_receive.data[0]
         # res = ResponseStatus(subcommand)
         response = "SUCCESS" if subcommand == 0xC9 else "FAILURE"
@@ -535,7 +514,6 @@ class EvenGlass(Glass):
         )
         # Implement notification response handling here
 
-        cmd = ble_receive.cmd
         subcommand = ble_receive.data[0]
 
         logging.info(f"Notification response: {subcommand}")
@@ -553,15 +531,12 @@ class EvenGlass(Glass):
         if self.audio_buffer:
             # Save audio data to WAV file
             logging.info("Saving audio data to WAV file...")
-            now = datetime.now()
-            timestamp = now.strftime("%Y%m%d_%H%M%S")
-            filename = f"audio_{self.side}_{timestamp}.wav"
             # with wave.open(filename, "wb") as wf:
             #     wf.setnchannels(1)
             #     wf.setsampwidth(2)
             #     wf.setframerate(16000)
             #     wf.writeframes(self.audio_buffer)
-            
+
         else:
             logging.warning("Audio buffer is empty; no data to save.")
 
