@@ -7,8 +7,6 @@ import sys
 import time
 import struct
 import json
-import wave
-from lc3 import Decoder
 
 from datetime import datetime
 
@@ -62,6 +60,7 @@ class Glass:
 
         self._heartbeat_seq = 0
         self._heartbeat_task = None
+        self._last_heartbeat_time = time.time()
 
         self._received_ack = False
         self._last_device_order = None
@@ -81,7 +80,7 @@ class Glass:
                 await self._discover_services()
                 await self.send_init_command()
                 await self._start_notifications()
-                if not self._heartbeat_task or self._heartbeat_task.done():
+                if not self._heartbeat_task:
                     self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
             else:
@@ -202,47 +201,46 @@ class Glass:
             logging.error(
                 f"Failed to subscribe to notifications for {self.side.capitalize()} glass ({self.address}): {e}"
             )
-
+            
+    async def _wait_for_ack (self, timeout=1.0):
+        """Wait for acknowledgment."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self._received_ack:
+                return True
+            await asyncio.sleep(0.1)
+        return False
+    
+    async def _heartbeat(self):
+        """Send a single heartbeat."""
+        length = 6
+        heartbeat_data = struct.pack(
+            "BBBBBB",
+            CMD.BLE_REQ_HEARTBEAT,
+            length & 0xFF,
+            (length >> 8) & 0xFF,
+            self._heartbeat_seq % 0xFF,
+            0x04,
+            self._heartbeat_seq % 0xFF,
+        )
+        self._heartbeat_seq += 1
+        await self.send_command(heartbeat_data)
+        logging.debug(
+            f"Sent heartbeat to {self.side.capitalize()} glass: {heartbeat_data.hex()}"
+        )
+        
     async def _heartbeat_loop(self):
         """Send periodic heartbeats to maintain connection."""
-        try:
-            while self.client.is_connected:
-                try:
-                    length = 6
-                    heartbeat_data = struct.pack(
-                        "BBBBBB",
-                        CMD.BLE_REQ_HEARTBEAT,
-                        length & 0xFF,
-                        (length >> 8) & 0xFF,
-                        self._heartbeat_seq % 0xFF,
-                        0x04,
-                        self._heartbeat_seq % 0xFF,
-                    )
-                    self._heartbeat_seq += 1
-                    await self.send_command(heartbeat_data)
-                    logging.debug(
-                        f"Sent heartbeat to {self.side.capitalize()} glass: {heartbeat_data.hex()}"
-                    )
-                    self._received_ack = False
-                    await asyncio.sleep(2)
-                    if not self._received_ack:
-                        logging.warning(
-                            f"No heartbeat ack from {self.side.capitalize()} glass: {self.name}"
-                        )
+        frequency = 5.0  # Heartbeat frequency in seconds
+        while self.client.is_connected:
+            current_time = time.time()
+            if  current_time - self._last_heartbeat_time > frequency:
+                self._last_heartbeat_time = current_time
+                await self._heartbeat()
+        
+        self._heartbeat_task.cancel()  # Cancel the heartbeat task
+        self._heartbeat_task = None
 
-                except Exception as e:
-                    logging.error(
-                        f"Error during heartbeat with {self.side.capitalize()} glass ({self.address}): {e}"
-                    )
-                    await self.client.disconnect()
-                    self._heartbeat_task.cancel()
-                    self._heartbeat_task = None
-                    break
-        except asyncio.CancelledError:
-            logging.info(
-                f"Heartbeat loop cancelled for {self.side.capitalize()} glass: {self.name} ({self.address})."
-            )
-            raise  # Re-raise to ensure the task is properly cancelled
 
     async def _handle_heartbeat_response(self, ble_receive: BleReceive):
         """Handle heartbeat response."""
@@ -259,7 +257,6 @@ class Glass:
 
         lines = self.format_text_lines(text)
         total_pages = (len(lines) + 4) // 5  # 5 lines per page
-
         if len(lines) <= 3:
             display_text = "\n\n" + "\n".join(lines)
             success = await self._send_text_packet(
@@ -413,7 +410,7 @@ class EvenGlass(Glass):
 
     def __init__(self, name: str, address: str, side: str):
         super().__init__(name, address, side)
-        self.audio_buffer = []  # List of (seq, audio_data) tuples
+        self.audio_buffer = bytearray()
         self._ack_event = asyncio.Event()
         recive_handlers = {
             CMD.RECEIVE_GLASSES_MIC_DATA: self._handle_receive_mic_data,
@@ -426,44 +423,15 @@ class EvenGlass(Glass):
         }
         self.recieved_command_handlers.update(recive_handlers)
 
+    # Receive command handlers
     async def _handle_receive_mic_data(self, ble_receive: BleReceive):
-        """Handle received mic data by storing as tuples and sorting later."""
-        if len(ble_receive.data) < 2:
-            logging.error("Received data is too short to contain seq and audio data.")
-            return
-
+        """Handle received mic data."""
         seq = ble_receive.data[0]
         audio_data = ble_receive.data[1:]
         logging.debug(
-            f"Received mic data from {self.side.capitalize()} glasses: Seq={seq}, Data={audio_data.hex()}"
+            f"Received mic data from {self.side.capitalize()} glasses] {audio_data.hex()}"
         )
-
-        # Append as a tuple (seq, audio_data)
-        self.audio_buffer.append((seq, audio_data))
-
-    def sort_audio_buffer(self):
-        """Sort the audio buffer based on sequence numbers, handling wrap-around."""
-        if not self.audio_buffer:
-            logging.warning("Audio buffer is empty; nothing to sort.")
-            return
-
-        # Sort based on sequence number with wrap-around consideration
-        self.audio_buffer.sort(key=lambda x: x[0])
-
-        # Optional: Handle missing or out-of-order packets here
-        
-    def get_ordered_audio_data(self) -> bytes:
-        """Retrieve and concatenate sorted audio data."""
-        self.sort_audio_buffer()
-
-        # Extract audio_data from sorted tuples
-        ordered_data = b''.join([data for _, data in self.audio_buffer])
-
-        # Clear the buffer after processing
-        self.audio_buffer.clear()
-        self.audio_buffer = []
-
-        return ordered_data
+        self.audio_buffer += audio_data
 
     async def _handle_mic_response(self, ble_receive: BleReceive):
         """Handle mic response."""
@@ -575,7 +543,6 @@ class EvenGlass(Glass):
     async def open_mic(self):
         """Open the mic."""
         await self.send_command(bytes([CMD.OPEN_GLASSES_MIC, MicEnableStatus.ENABLE]))
-        
 
     async def close_mic(self):
         """Close the mic."""
@@ -583,61 +550,17 @@ class EvenGlass(Glass):
 
     async def save_audio_data(self):
         """Save and decode audio data to WAV file."""
-        audio_data = self.get_ordered_audio_data()
-        if audio_data:
-            # LC3 decoding parameters
-            sample_rate = 16000  # Ensure this matches your audio source
-            num_channels = 1     # Mono audio
-            frame_duration = 10  # Frame duration in milliseconds
-
-            try:
-                decoder = Decoder(
-                    nchannels=num_channels,
-                    samplerate=sample_rate,
-                    frame_duration=frame_duration,
-                )
-                logging.info("Decoder initialized successfully.")
-            except Exception as e:
-                logging.error(f"Failed to initialize Decoder: {e}")
-                return
-
-            pcm_data = bytearray()
-            
-            # frames based on frame duration 10 frame per chunk
-            frame_chunks = [  audio_data[i:i+320] for i in range(0, len(audio_data), 320) ]
-            logging.info(f"Frame chunks: {len(frame_chunks)}")
-            
-            # Process each frame in the audio buffer
-            for idx, frame in enumerate(frame_chunks):
-                logging.debug(f"Decoding frame {idx+1}/{len(audio_data)}")
-                logging.debug(f"Frame size: {len(frame)} bytes")
-                try:
-                    decoded_frame = decoder.decode(data=frame,bitdepth=16)
-                    pcm_data += decoded_frame
-                    logging.debug(f"Frame {idx+1} decoded successfully.")
-                except ValueError as e:
-                    logging.error(f"Failed to decode frame {idx+1}: {e}")
-                    logging.debug(f"Frame data: {frame}")
-                    logging.debug(f"Decoder parameters: nchannels={num_channels}, "
-                                f"samplerate={sample_rate}, frame_duration={frame_duration}, bitdepth=16")
-                    return
-                except Exception as e:
-                    logging.error(f"Unexpected error decoding frame {idx+1}: {e}")
-                    return
-
-            # Save the PCM data to a WAV file
-            wav_filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
-
-            try:
-                with wave.open(wav_filename, "wb") as wf:
-                    wf.setnchannels(num_channels)
-                    wf.setsampwidth(2)  # 8-bit audio
-                    wf.setframerate(sample_rate)
-                    wf.writeframes(pcm_data)
-                await asyncio.sleep(0.5)
-                logging.info(f"Saved audio data to {wav_filename}.")
-            except Exception as e:
-                logging.error(f"Failed to write WAV file: {e}")
+        if self.audio_buffer:
+            # Save audio data to WAV file
+            logging.info("Saving audio data to WAV file...")
+            now = datetime.now()
+            timestamp = now.strftime("%Y%m%d_%H%M%S")
+            filename = f"audio_{self.side}_{timestamp}.wav"
+            # with wave.open(filename, "wb") as wf:
+            #     wf.setnchannels(1)
+            #     wf.setsampwidth(2)
+            #     wf.setframerate(16000)
+            #     wf.writeframes(self.audio_buffer)
             
         else:
             logging.warning("Audio buffer is empty; no data to save.")

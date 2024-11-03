@@ -13,7 +13,7 @@ from even_glasses.models import (
 )
 
 
-__version__ = "0.1.04"
+__version__ = "0.1.05"
 
 __all__ = [
     "BleReceive",
