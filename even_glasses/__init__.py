@@ -4,6 +4,13 @@ from even_glasses.ble_manager import (
     EvenGlass,
     GlassesProtocol,
 )
+from even_glasses.models import (
+    CMD,
+    ScreenAction,
+    EvenAIStatus,
+    Notification,
+    NCSNotification,
+)
 
 
 __version__ = "0.1.04"
@@ -13,4 +20,9 @@ __all__ = [
     "Glass",
     "EvenGlass",
     "GlassesProtocol",
+    "CMD",
+    "ScreenAction",
+    "EvenAIStatus",
+    "Notification",
+    "NCSNotification",
 ]

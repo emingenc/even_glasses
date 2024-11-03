@@ -1,5 +1,8 @@
 from enum import IntEnum
 from pydantic import BaseModel, Field
+from typing import Literal
+from datetime import datetime
+import time
 
 
 class DeviceOrders(IntEnum):
@@ -20,6 +23,9 @@ class CMD(IntEnum):
     SEND_AI_RESULT = 0x4E
     BLE_REQ_QUICK_NOTE = 0x21
     BLE_REQ_DASHBOARD = 0x22
+
+    # Notification commands
+    NOTIFICATION = 0x4B
 
 
 class StartEvenAISubCMD(IntEnum):
@@ -101,3 +107,39 @@ class SendAIResult(BaseModel):
         Combines ScreenAction and EvenAIStatus into a single byte for the newscreen field.
         """
         self.newscreen = screen_action.value | even_ai_status.value
+ 
+
+class NCSNotification(BaseModel):
+    msg_id: int = Field(..., alias="msg_id", description="Message ID")
+    type: int = Field(1, alias="type", description="Notification type")
+    app_identifier: str = Field(..., alias="app_identifier", description="App identifier")
+    title: str = Field(..., alias="title", description="Notification title")
+    subtitle: str = Field(..., alias="subtitle", description="Notification subtitle")
+    message: str = Field(..., alias="message", description="Notification message")
+    time_s: int = Field(default_factory=lambda: int(time.time()), alias="time_s", description="Current time in seconds since the epoch")
+    date: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"), alias="date", description="Current date and time")
+    display_name: str = Field(..., alias="display_name", description="Display name")
+
+    class Config:
+        allow_population_by_field_name = True
+
+class Notification(BaseModel):
+    ncs_notification: NCSNotification = Field(..., alias="ncs_notification", description="NCS Notification details")
+    type: Literal["Add"] = Field("Add", alias="type", description="Type of notification")   # noqa: F821
+
+    class Config:
+        allow_population_by_field_name = True
+
+def create_notification(msg_id, app_identifier, title, subtitle, message, display_name):
+    notification = Notification(
+        ncs_notification=NCSNotification(
+            msg_id=msg_id,
+            app_identifier=app_identifier,
+            title=title,
+            subtitle=subtitle,
+            message=message,
+            display_name=display_name
+        )
+    )
+    return notification
+

@@ -6,6 +6,9 @@ from typing import Callable, Dict, Any
 import sys
 import time
 import struct
+import json
+
+from datetime import datetime
 
 from even_glasses.models import (
     DeviceOrders,
@@ -18,6 +21,8 @@ from even_glasses.models import (
     ScreenAction,
     SendAIResult,
     OpenGlassesMic,
+    Notification,
+    create_notification,
 )
 from even_glasses.service_identifiers import (
     UART_SERVICE_UUID,
@@ -410,6 +415,7 @@ class EvenGlass(Glass):
             CMD.BLE_REQ_DASHBOARD: self._handle_dashboard,
             CMD.START_EVEN_AI: self.even_ai_control,
             CMD.SEND_AI_RESULT: self._handle_send_ai_result,
+            CMD.NOTIFICATION: self._handle_notification_response,
         }
         self.recieved_command_handlers.update(recive_handlers)
 
@@ -473,7 +479,7 @@ class EvenGlass(Glass):
                 param=ble_receive.data[1:],
             )
 
-            logging.info(f"Even AI control command: {even_ai.json()}")
+            logging.info(f"Even AI control command: {even_ai.model_dump_json()}")
 
             if subcmd == StartEvenAISubCMD.START:
                 await start_even_ai(ble_receive)
@@ -496,15 +502,61 @@ class EvenGlass(Glass):
 
         logging.info(f"AI result response: {res}")
 
+    async def _handle_notification_response(self, ble_receive: BleReceive):
+        """Handle notification response."""
+        logging.info(
+            f"Received notification response from {self.side.capitalize()} glasses ({self.address})."
+        )
+        # Implement notification response handling here
+
+        cmd = ble_receive.cmd
+        subcommand = ble_receive.data[0]
+
+        logging.info(f"Notification response: {subcommand}")
+
     async def open_mic(self):
         """Open or close the mic."""
         cmd = OpenGlassesMic(enable=MicEnableStatus.ENABLE)
-        await self.send_command(cmd.json().encode("utf-8"))
+        await self.send_command(cmd.model_dump_json().encode("utf-8"))
 
     async def close_mic(self):
         """Close the mic."""
         cmd = OpenGlassesMic(enable=MicEnableStatus.DISABLE)
-        await self.send_command(cmd.json().encode("utf-8"))
+        await self.send_command(cmd.model_dump_json().encode("utf-8"))
+
+    async def send_notification(
+        self,
+        notification: Notification,
+    ):
+        # Serialize JSON without spaces using json.dumps and model_dump
+        
+        json_str = json.dumps(
+            notification.model_dump(by_alias=True), separators=(",", ":")
+        )
+        logging.info(f"Notification JSON: {json_str}")
+        json_bytes = json_str.encode("utf-8")
+
+        # Split the data into chunks of 176 bytes (180 bytes total minus 4-byte header)
+        max_chunk_size = 180 - 4  # Subtracting 4 bytes for header
+        chunks = [
+            json_bytes[i : i + max_chunk_size]
+            for i in range(0, len(json_bytes), max_chunk_size)
+        ]
+
+        total_chunks = len(chunks)
+        for index, chunk in enumerate(chunks):
+            # notifyId = 0 for first message, 1 for subsequent messages
+            notify_id = 0 if index == 0 else 1
+
+            # Construct the header matching the debug output
+            header = bytes([CMD.NOTIFICATION, notify_id, total_chunks, index])
+
+            # Debugging: Print the header values
+            print(f"Header Bytes: {[hex(b) for b in header]}")
+
+            encoded_chunk = header + chunk
+            await self.send_command(encoded_chunk)
+            await asyncio.sleep(0.1)
 
 
 class GlassesProtocol:
@@ -621,6 +673,18 @@ class GlassesProtocol:
                         f"Send text to {glass.side.capitalize()} glasses ({glass.address}) {'succeeded' if result else 'failed'}."
                     )
 
+    async def send_notification(self, notification: Notification):
+        tasks = {}
+        for glass in self.glasses.values():
+            if glass.client.is_connected:
+                tasks[glass.address] = asyncio.create_task(
+                    glass.send_notification(notification)
+                )
+            else:
+                logging.warning(
+                    f"{glass.side.capitalize()} glasses ({glass.name} - {glass.address}) are not connected."
+                )
+
     async def graceful_shutdown(self):
         """Disconnect from all glasses gracefully."""
         logging.info("Shutting down GlassesProtocol...")
@@ -647,6 +711,15 @@ async def main():
             await glasses.send_text(test_message)
             logging.info("Sent test text message to all glasses.")
             await asyncio.sleep(20)
+            notification = create_notification(
+                msg_id=1,
+                app_identifier="com.example.app",
+                title="Notification Title",
+                subtitle="Notification Subtitle",
+                message="This is a test notification message.",
+                display_name="Example App",
+            )
+            await glasses.send_notification(notification)
 
     except KeyboardInterrupt:
         logging.info("KeyboardInterrupt received. Initiating shutdown...")
