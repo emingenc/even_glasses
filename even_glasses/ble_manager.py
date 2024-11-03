@@ -249,7 +249,6 @@ class Glass:
                 logging.error(
                     f"Failed to send initial text to {self.side.capitalize()} glass: {self.name} ({self.address})."
                 )
-                return False
             await asyncio.sleep(1)
             success = await self._send_text_packet(
                 display_text, new_screen, EvenAIStatus.DISPLAY_COMPLETE, 1, 1
@@ -283,7 +282,7 @@ class Glass:
 
                 is_last_page = start_idx + 5 >= len(lines)
                 status = (
-                    EvenAIStatus.DISPLAYING if is_last_page else EvenAIStatus.DISPLAYING
+                    EvenAIStatus.DISPLAYING if not is_last_page else EvenAIStatus.DISPLAY_COMPLETE
                 )
                 success = await self._send_text_packet(
                     display_text, new_screen, status, current_page, total_pages
