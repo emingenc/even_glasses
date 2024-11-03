@@ -1,7 +1,7 @@
 import json
 import flet as ft
 from even_glasses import GlassesProtocol
-from even_glasses import Notification, NCSNotification
+from even_glasses import Notification, NCSNotification, RSVPConfig
 
 glasses = GlassesProtocol()
 
@@ -56,6 +56,96 @@ async def main(page: ft.Page):
         width=750,
         height=500,
     )
+    
+    # RSVP Configuration
+    rsvp_header = ft.Text(value="RSVP Settings", size=18, weight=ft.FontWeight.BOLD)
+    
+    words_per_group = ft.TextField(
+        label="Words per group",
+        width=200,
+        value="4",
+        keyboard_type=ft.KeyboardType.NUMBER
+    )
+    
+    wpm_input = ft.TextField(
+        label="Words per minute",
+        width=200,
+        value="750",
+        keyboard_type=ft.KeyboardType.NUMBER
+    )
+    
+    padding_char = ft.TextField(
+        label="Padding character",
+        width=200,
+        value="---"
+    )
+    
+    demo_text =  """
+        Fast reading apps that display text word by word or in small groups (like two words at a time) are utilizing a technique known as Rapid Serial Visual Presentation (RSVP). Here’s what this means and why it’s used:
+
+What is RSVP?
+
+RSVP is a method where text is presented sequentially in the same spot on the screen, one word or a small cluster of words at a time, rather than in traditional sentence or paragraph formats. This approach is designed to streamline the reading process.
+
+Why Use Word-by-Word or Two-Word Display?
+
+	1.	Minimizes Eye Movement:
+	•	Traditional Reading: Involves frequent eye movements (saccades) as your eyes jump from one word to the next and scan across lines.
+	•	RSVP Method: Eliminates the need for these movements by keeping the focus point stationary, reducing the time spent shifting gaze.
+	2.	Enhances Focus and Reduces Distractions:
+	•	Presenting one or two words at a time helps concentrate the reader’s attention on each word without the distraction of surrounding text.
+	3.	Increases Reading Speed:
+	•	By controlling the pace at which words appear, these apps can gradually increase the speed, training your brain to process information more quickly.
+	4.	Improves Comprehension and Retention:
+	•	For some users, especially those practicing speed reading techniques, this method can help improve comprehension by forcing the brain to focus intently on each word or pair of words.
+	5.	Efficient Use of Time:
+	•	Ideal for people looking"""
+    
+    rsvp_text = ft.TextField(
+        label="Text for RSVP",
+        width=750,
+        multiline=True,
+        min_lines=3,
+        max_lines=10,
+        value=f"Enter text for rapid serial visual presentation... {demo_text}"
+    )
+    
+    rsvp_status = ft.Text(value="RSVP Status: Ready", size=14)
+    start_rsvp_button = ft.ElevatedButton(text="Start RSVP", disabled=True)
+
+    async def start_rsvp(e):
+        try:
+            words_count = int(words_per_group.value)
+            speed = int(wpm_input.value)
+            pad_char = padding_char.value or "..."
+            
+            config = RSVPConfig(
+                words_per_group=words_count,
+                wpm=speed,
+                padding_char=pad_char,
+                retry_delay=0.005,
+                max_retries=2
+            )
+            
+            start_rsvp_button.disabled = True
+            rsvp_status.value = "RSVP Status: Running..."
+            page.update()
+            
+            await glasses.send_rsvp(rsvp_text.value, config)
+            
+            rsvp_status.value = "RSVP Status: Complete"
+            start_rsvp_button.disabled = False
+            page.update()
+            
+        except ValueError as e:
+            log_message(f"RSVP Error: Invalid number format - {str(e)}")
+        except Exception as e:
+            log_message(f"RSVP Error: {str(e)}")
+        finally:
+            start_rsvp_button.disabled = False
+            page.update()
+
+    start_rsvp_button.on_click = start_rsvp
 
     def log_message(message):
         log_output.value += message + "\n"
@@ -77,6 +167,7 @@ async def main(page: ft.Page):
         disconnect_button.visible = connected
         send_button.disabled = not connected
         send_notification_button.disabled = not connected
+        start_rsvp_button.disabled = not connected
         page.update()
 
     glasses.on_status_changed = on_status_changed
@@ -203,6 +294,23 @@ async def main(page: ft.Page):
                 ),
                 ft.Row(
                     [send_notification_button],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=20,
+                ),
+                ft.Divider(),
+                rsvp_header,
+                ft.Row(
+                    [words_per_group, wpm_input, padding_char],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=20,
+                ),
+                ft.Row(
+                    [rsvp_text],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=20,
+                ),
+                ft.Row(
+                    [start_rsvp_button, rsvp_status],
                     alignment=ft.MainAxisAlignment.CENTER,
                     spacing=20,
                 ),
