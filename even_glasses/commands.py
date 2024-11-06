@@ -1,5 +1,15 @@
-from models import Command, SubCommand, MicStatus, SendResult, ScreenAction, AIStatus
+from models import (
+    Command,
+    SubCommand,
+    MicStatus,
+    SendResult,
+    ScreenAction,
+    AIStatus,
+    RSVPConfig,
+)
 import asyncio
+import logging
+from typing import List
 
 
 def construct_start_ai(subcmd: SubCommand, param: bytes = b"") -> bytes:
@@ -38,7 +48,7 @@ async def send_text_packet(
     page_number: int = 1,
     max_pages: int = 1,
     screen_status: int = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING,
-    wait: float = 2
+    wait: float = 2,
 ) -> str:
     text_bytes = text_message.encode("utf-8")
 
@@ -58,7 +68,7 @@ async def send_text_packet(
     # Send to the left glass and wait for acknowledgment
     await manager.left_glass.send(ai_result_command)
     await asyncio.wait_for(manager.left_glass.message_queue.get(), wait)
-    await asyncio.sleep(0.01)
+    # await asyncio.sleep(0.005)
     # Send to the right glass and wait for acknowledgment
     await manager.right_glass.send(ai_result_command)
     await asyncio.wait_for(manager.right_glass.message_queue.get(), wait)
@@ -67,23 +77,23 @@ async def send_text_packet(
     return text_message
 
 
-async def send_text(manager, text_message: str, wait: float = 3) -> str:
+async def send_text(manager, text_message: str, duration: float = 5) -> str:
     lines = format_text_lines(text_message)
     total_pages = (len(lines) + 4) // 5  # 5 lines per page
 
     for pn, page in enumerate(range(0, len(lines), 5), start=1):
-        page_lines = lines[page:page + 5]
-        
+        page_lines = lines[page : page + 5]
+
         # Add vertical centering for pages with fewer than 5 lines
         if len(page_lines) < 5:
             padding = (5 - len(page_lines)) // 2
-            page_lines = [''] * padding + page_lines + [''] * (5 - len(page_lines) - padding)
-            
-        text = '\n'.join(page_lines)
-        screen_status = (
-            ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING 
-        )
-    
+            page_lines = (
+                [""] * padding + page_lines + [""] * (5 - len(page_lines) - padding)
+            )
+
+        text = "\n".join(page_lines)
+        screen_status = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING
+
         await send_text_packet(
             manager=manager,
             text_message=text,
@@ -91,13 +101,11 @@ async def send_text(manager, text_message: str, wait: float = 3) -> str:
             max_pages=total_pages,
             screen_status=screen_status,
         )
-        if pn != 1:
-            await asyncio.sleep(wait)
+        if pn != 1 and total_pages != 1:
+            await asyncio.sleep(duration)
         if pn == total_pages:
-            screen_status = (
-                ScreenAction.NEW_CONTENT | AIStatus.DISPLAY_COMPLETE 
-            )
-        
+            screen_status = ScreenAction.NEW_CONTENT | AIStatus.DISPLAY_COMPLETE
+
             await send_text_packet(
                 manager=manager,
                 text_message=text,
@@ -107,3 +115,56 @@ async def send_text(manager, text_message: str, wait: float = 3) -> str:
             )
     return text_message
 
+
+def group_words(words: List[str], config: RSVPConfig) -> List[str]:
+    """Group words according to configuration"""
+    groups = []
+    for i in range(0, len(words), config.words_per_group):
+        group = words[i : i + config.words_per_group]
+        if len(group) < config.words_per_group:
+            group.extend([config.padding_char] * (config.words_per_group - len(group)))
+        groups.append(" ".join(group))
+    return groups
+
+
+async def send_rsvp(manager, text: str, config: RSVPConfig):
+    """Display text using RSVP method with improved error handling"""
+    if not text:
+        logging.warning("Empty text provided")
+        return False
+
+    try:
+        delay = 60.0 / config.wpm
+        words = text.split()
+        if not words:
+            logging.warning("No words to display after splitting")
+            return False
+
+        # Add padding groups for initial display
+        padding_groups = [""] * (config.words_per_group - 1)
+        word_groups = padding_groups + group_words(words, config)
+
+        for group in word_groups:
+            if not group:  # Skip empty padding groups
+                await asyncio.sleep(delay * config.words_per_group)
+                continue
+
+            success = await send_text(manager, group)
+            if not success:
+                logging.error(f"Failed to display group: {group}")
+                return False
+
+            await asyncio.sleep(delay * config.words_per_group)
+
+        # Clear display
+        await send_text(manager, "--")
+        return True
+
+    except asyncio.CancelledError:
+        logging.info("RSVP display cancelled")
+        await send_text(manager, "--")  # Clear display on cancellation
+        raise
+    except Exception as e:
+        logging.error(f"Error in RSVP display: {e}")
+        await send_text(manager, "--")  # Try to clear display
+        return False
