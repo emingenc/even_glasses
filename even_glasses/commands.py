@@ -72,10 +72,17 @@ async def send_text(manager, text_message: str, wait: float = 3) -> str:
     total_pages = (len(lines) + 4) // 5  # 5 lines per page
 
     for pn, page in enumerate(range(0, len(lines), 5), start=1):
-        text = "\n".join(lines[page : page + 5])
+        page_lines = lines[page:page + 5]
+        
+        # Add vertical centering for pages with fewer than 5 lines
+        if len(page_lines) < 5:
+            padding = (5 - len(page_lines)) // 2
+            page_lines = [''] * padding + page_lines + [''] * (5 - len(page_lines) - padding)
+            
+        text = '\n'.join(page_lines)
         screen_status = (
-                ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING 
-            )
+            ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING 
+        )
     
         await send_text_packet(
             manager=manager,
@@ -99,5 +106,4 @@ async def send_text(manager, text_message: str, wait: float = 3) -> str:
                 screen_status=screen_status,
             )
     return text_message
-
 
