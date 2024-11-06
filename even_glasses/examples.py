@@ -11,7 +11,7 @@ with open(rsvp_text_path, "r") as f:
     text = f.read()
 
     
-config = RSVPConfig(words_per_group=8, wpm=1500, padding_char="...")
+config = RSVPConfig(words_per_group=3, wpm=750, padding_char="...")
 
 async def main():
     manager = GlassesManager(left_address=None, right_address=None)
