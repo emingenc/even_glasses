@@ -28,7 +28,10 @@ class BleDevice:
         logging.info(f"Connected to {self.name}")
         await self.client.connect()
         await asyncio.sleep(1)
-        await self.start_notifications()
+        try:
+            await self.start_notifications()
+        except Exception as e:
+            logging.error(f"Failed to start notifications: {e}")
 
     async def disconnect(self):
         await self.client.disconnect()
