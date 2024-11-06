@@ -106,8 +106,6 @@ class RSVPConfig:
     words_per_group: int = 1
     wpm: int = 250
     padding_char: str = "..."
-    max_retries: int = 3
-    retry_delay: float = 0.5
     
 class BleReceive:
     """BLE Receive Data Structure."""
