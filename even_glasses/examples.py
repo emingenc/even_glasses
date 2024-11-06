@@ -22,10 +22,11 @@ async def main():
     await send_text(manager, "Init message!") # we need to send a message to init even ai message sending
     await asyncio.sleep(5)
     counter = 1
-    # await send_text(manager, f" Hello, World! {counter}")
-    await send_rsvp(manager, text, config)
-    await asyncio.sleep(4)
-    counter += 1
+    while KeyboardInterrupt:
+        # await send_text(manager, f"Hello Wrold! {counter}")
+        await send_rsvp(manager, text, config)
+        await asyncio.sleep(1)
+        counter += 1
     
 
 if __name__ == "__main__":

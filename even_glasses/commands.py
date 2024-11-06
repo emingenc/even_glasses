@@ -49,6 +49,7 @@ async def send_text_packet(
     max_pages: int = 1,
     screen_status: int = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING,
     wait: float = 2,
+    delay: float = 0.1,
 ) -> str:
     text_bytes = text_message.encode("utf-8")
 
@@ -68,7 +69,7 @@ async def send_text_packet(
     # Send to the left glass and wait for acknowledgment
     await manager.left_glass.send(ai_result_command)
     await asyncio.wait_for(manager.left_glass.message_queue.get(), wait)
-    # await asyncio.sleep(0.005)
+    await asyncio.sleep(delay)
     # Send to the right glass and wait for acknowledgment
     await manager.right_glass.send(ai_result_command)
     await asyncio.wait_for(manager.right_glass.message_queue.get(), wait)
@@ -134,7 +135,11 @@ async def send_rsvp(manager, text: str, config: RSVPConfig):
         return False
 
     try:
-        delay = 60.0 / config.wpm
+        
+        # default delay is 01 second we are adding below to that so we need to calculate the delay
+        screen_delay = 60 / config.wpm
+        logging.info(f"Words screen change delay: {screen_delay}")
+        delay = min(screen_delay - 0.1 , 0.1) # Delay between words set min to 0.1
         words = text.split()
         if not words:
             logging.warning("No words to display after splitting")
