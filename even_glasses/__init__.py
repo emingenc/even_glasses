@@ -11,7 +11,7 @@ from even_glasses.models import (
     Command,  
 )
 
-__version__ = "0.1.05"
+__version__ = "0.1.06"
 
 __all__ = [
     "BleReceive",
