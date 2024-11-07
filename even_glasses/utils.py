@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import struct
-from even_glasses.models import Command, ResponseStatus
+from even_glasses.models import Command, ResponseStatus, NCSNotification, Notification
 
 
 async def wait_for_ack(device, timeout: int = 5):
@@ -31,3 +31,13 @@ def construct_heartbeat(seq: int) -> bytes:
         0x04,
         seq % 0xFF,
     )
+
+
+async def construct_notification(ncs_notification=NCSNotification):
+
+    # Create Notification instance
+    notification = Notification(ncs_notification=ncs_notification, type="Add")
+
+    # Get notification chunks
+    chunks = await notification.construct_notification()
+    return chunks

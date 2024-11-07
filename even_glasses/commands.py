@@ -6,11 +6,12 @@ from even_glasses.models import (
     ScreenAction,
     AIStatus,
     RSVPConfig,
-    Notification
+    NCSNotification,
 )
 import asyncio
 import logging
 from typing import List
+from even_glasses.utils import construct_notification
 
 
 def construct_start_ai(subcmd: SubCommand, param: bytes = b"") -> bytes:
@@ -177,9 +178,9 @@ async def send_rsvp(manager, text: str, config: RSVPConfig):
     
 
 
-async def send_notification(manager, notification: Notification):
+async def send_notification(manager, notification: NCSNotification):
     """Send a notification to the glasses."""
-    notification_chunks = await notification.construct_notification()
+    notification_chunks = await construct_notification(notification)
     for chunk in notification_chunks:
             await manager.left_glass.send(chunk)
             await manager.right_glass.send(chunk)

@@ -1,10 +1,9 @@
-# models.py
-
-from enum import IntEnum
-from dataclasses import dataclass
-from datetime import datetime
+from pydantic import BaseModel, Field
+from typing import Literal
 import time
 import json
+from enum import IntEnum
+from datetime import datetime
 
 
 class Command(IntEnum):
@@ -42,24 +41,23 @@ class ScreenAction(IntEnum):
 
 
 class AIStatus(IntEnum):
-    DISPLAYING = 0x30  # Even AI displaying（automatic mode default）
-    DISPLAY_COMPLETE = 0x40  # Even AI display complete ( last page of automatic mode)
+    DISPLAYING = 0x30  # Even AI displaying (automatic mode default)
+    DISPLAY_COMPLETE = 0x40  # Even AI display complete (last page of automatic mode)
     MANUAL_MODE = 0x50  # Even AI manual mode
     NETWORK_ERROR = 0x60  # Even AI network error
 
 
-@dataclass
-class SendResult:
-    command: int = Command.SEND_RESULT
-    seq: int = 0
-    total_packages: int = 0
-    current_package: int = 0
-    screen_status: int = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING
-    new_char_pos0: int = 0
-    new_char_pos1: int = 0
-    page_number: int = 1
-    max_pages: int = 1
-    data: bytes = b""
+class SendResult(BaseModel):
+    command: int = Field(default=Command.SEND_RESULT)
+    seq: int = Field(default=0)
+    total_packages: int = Field(default=0)
+    current_package: int = Field(default=0)
+    screen_status: int = Field(default=ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING)
+    new_char_pos0: int = Field(default=0)
+    new_char_pos1: int = Field(default=0)
+    page_number: int = Field(default=1)
+    max_pages: int = Field(default=1)
+    data: bytes = Field(default=b"")
 
     def build(self) -> bytes:
         header = bytes(
@@ -78,74 +76,74 @@ class SendResult:
         return header + self.data
 
 
-@dataclass
-class Notification:
-    msg_id: int
-    app_identifier: str
-    title: str
-    subtitle: str
-    message: str
-    display_name: str
-    timestamp: int = int(time.time())
-    date: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+class NCSNotification(BaseModel):
+    msg_id: int = Field(..., alias="msg_id", description="Message ID")
+    type: int = Field(1, alias="type", description="Notification type")
+    app_identifier: str = Field(
+        ..., alias="app_identifier", description="App identifier"
+    )
+    title: str = Field(..., alias="title", description="Notification title")
+    subtitle: str = Field(..., alias="subtitle", description="Notification subtitle")
+    message: str = Field(..., alias="message", description="Notification message")
+    time_s: int = Field(
+        default_factory=lambda: int(time.time()),
+        alias="time_s",
+        description="Current time in seconds since the epoch",
+    )
+    date: str = Field(
+        default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        alias="date",
+        description="Current date and time",
+    )
+    display_name: str = Field(..., alias="display_name", description="Display name")
 
-    def to_dict(self):
-        return {
-            "msg_id": self.msg_id,
-            "type": 1,
-            "app_identifier": self.app_identifier,
-            "title": self.title,
-            "subtitle": self.subtitle,
-            "message": self.message,
-            "time_s": self.timestamp,
-            "date": self.date,
-            "display_name": self.display_name,
-        }
+    class Config:
+        populate_by_name = True
+
+
+class Notification(BaseModel):
+    ncs_notification: NCSNotification = Field(
+        ..., alias="ncs_notification", description="NCS Notification details"
+    )
+    type: Literal["Add"] = Field(
+        "Add", alias="type", description="Type of notification"
+    )
+
+    class Config:
+        populate_by_name = True
+        allow_population_by_field_name = True
 
     def to_json(self):
-        return json.dumps(self.to_dict())
+        return self.model_dump(by_alias=True)
 
     def to_bytes(self):
-        return self.to_json().encode("utf-8")
+        return json.dumps(self.to_json()).encode("utf-8")
 
     async def construct_notification(self):
         json_bytes = self.to_bytes()
-
-        # Split the data into chunks of 176 bytes (180 bytes total minus 4-byte header)
-        max_chunk_size = 180 - 4  # Subtracting 4 bytes for header
+        max_chunk_size = 180 - 4  # Subtract 4 bytes for header
         chunks = [
             json_bytes[i : i + max_chunk_size]
             for i in range(0, len(json_bytes), max_chunk_size)
         ]
-
         total_chunks = len(chunks)
         encoded_chunks = []
         for index, chunk in enumerate(chunks):
-            notify_id = 0
-
-            # Construct the header matching the debug output
+            notify_id = 0  # Set appropriate notification ID
             header = bytes([Command.NOTIFICATION, notify_id, total_chunks, index])
-
-            # Debugging: Print the header values
-            print(f"Header Bytes: {[hex(b) for b in header]}")
-
             encoded_chunk = header + chunk
             encoded_chunks.append(encoded_chunk)
         return encoded_chunks
 
 
-@dataclass
-class RSVPConfig:
-    words_per_group: int = 1
-    wpm: int = 250
-    padding_char: str = "..."
+class RSVPConfig(BaseModel):
+    words_per_group: int = Field(default=1)
+    wpm: int = Field(default=250)
+    padding_char: str = Field(default="...")
 
 
-class BleReceive:
-    """BLE Receive Data Structure."""
-
-    def __init__(self, lr="L", cmd=0x00, data=None, is_timeout=False):
-        self.lr = lr  # Left or Right
-        self.cmd = cmd
-        self.data = data if data else bytes()
-        self.is_timeout = is_timeout
+class BleReceive(BaseModel):
+    lr: str = Field(default="L", description="Left or Right")
+    cmd: int = Field(default=0x00)
+    data: bytes = Field(default_factory=bytes)
+    is_timeout: bool = Field(default=False)

@@ -2,8 +2,9 @@ import asyncio
 import argparse
 import logging
 from even_glasses.bluetooth_manager import GlassesManager
-from even_glasses.commands import send_text, send_rsvp
-from even_glasses.models import RSVPConfig
+from even_glasses.commands import send_text, send_rsvp, send_notification
+from even_glasses.models import RSVPConfig, NCSNotification
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -15,6 +16,9 @@ def parse_args():
     test_type = parser.add_mutually_exclusive_group(required=True)
     test_type.add_argument("--rsvp", action="store_true", help="Run RSVP test")
     test_type.add_argument("--text", action="store_true", help="Run text test")
+    test_type.add_argument(
+        "--notification", action="store_true", help="Run notification test"
+    )
 
     # Optional arguments for RSVP configuration
     parser.add_argument(
@@ -45,14 +49,10 @@ async def test_rsvp(manager: GlassesManager, text: str, config: RSVPConfig):
         manager, "Init message!"
     )  # we need to send a message to init even ai message sending
     await asyncio.sleep(5)
-    counter = 1
-    while KeyboardInterrupt:
-        # await send_text(manager, f"Hello Wrold! {counter}")
-        await send_rsvp(manager, text, config)
-        await asyncio.sleep(3)
-        await send_text(manager, "RSVP Done! restarting in 3 seconds")
-        await asyncio.sleep(3)
-        counter += 1
+    await send_rsvp(manager, text, config)
+    await asyncio.sleep(3)
+    await send_text(manager, "RSVP Done! restarting in 3 seconds")
+    await asyncio.sleep(3)
 
 
 async def test_text(manager: GlassesManager, text: str):
@@ -60,6 +60,13 @@ async def test_text(manager: GlassesManager, text: str):
         logging.error("Could not connect to glasses devices.")
         return
     await send_text(manager, text)
+
+
+async def test_notification(manager: GlassesManager, notification: NCSNotification):
+    if not manager.left_glass or not manager.right_glass:
+        logging.error("Could not connect to glasses devices.")
+        return
+    await send_notification(manager, notification)
 
 
 async def main():
@@ -84,9 +91,21 @@ async def main():
         try:
             if args.rsvp:
                 await test_rsvp(manager=manager, text=text, config=config)
-            else:
-                text = f"Hello World! {counter}"
+            elif args.text:
+                text = f"Test message {counter}"
                 await test_text(manager=manager, text=text)
+            elif args.notification:
+                notification = NCSNotification(
+                    msg_id=1,
+                    title="Test Notification Title",
+                    subtitle="Test Notification Subtitle",
+                    message="This is a test notification",
+                    display_name="Test Notification",
+                    app_identifier="org.telegram.messenger",
+                )
+
+                await test_notification(manager=manager, notification=notification)
+
         except KeyboardInterrupt:
             logging.info("Test stopped by user")
         except Exception as e:
