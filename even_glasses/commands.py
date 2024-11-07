@@ -51,12 +51,13 @@ async def send_text_packet(
     max_pages: int = 1,
     screen_status: int = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING,
     wait: float = 2,
-    delay: float = 0.1,
+    delay: float = 0.4,
+    seq: int = 0,
 ) -> str:
     text_bytes = text_message.encode("utf-8")
 
     result = SendResult(
-        seq=manager.evenai_seq,
+        seq=seq,
         total_packages=1,
         current_package=0,
         screen_status=screen_status,
@@ -68,14 +69,18 @@ async def send_text_packet(
     )
     ai_result_command = result.build()
 
-    # Send to the left glass and wait for acknowledgment
-    await manager.left_glass.send(ai_result_command)
-    await asyncio.sleep(delay)
-    # Send to the right glass and wait for acknowledgment
-    await manager.right_glass.send(ai_result_command)
-    # await wait_for_ack(manager.right_glass)
-    manager.evenai_seq += 1
-    return text_message
+    if manager.left_glass and manager.right_glass:
+        # Send to the left glass and wait for acknowledgment
+        await manager.left_glass.send(ai_result_command)
+        await asyncio.sleep(delay)
+        # Send to the right glass and wait for acknowledgment
+        await manager.right_glass.send(ai_result_command)
+        await asyncio.sleep(delay)
+        
+        return text_message
+    else:
+        logging.error("Could not connect to glasses devices.")
+        return False
 
 
 async def send_text(manager, text_message: str, duration: float = 5) -> str:

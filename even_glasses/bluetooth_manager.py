@@ -1,14 +1,18 @@
-import time
-import logging
 import asyncio
+import logging
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
+from typing import Optional, Callable
+
 from even_glasses.utils import construct_heartbeat
 from even_glasses.service_identifiers import (
     UART_SERVICE_UUID,
     UART_TX_CHAR_UUID,
     UART_RX_CHAR_UUID,
 )
-from even_glasses.models import BleReceive
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class BleDevice:
@@ -17,83 +21,100 @@ class BleDevice:
     def __init__(self, name: str, address: str):
         self.name = name
         self.address = address
-        self.uart_tx = UART_TX_CHAR_UUID
-        self.uart_rx = UART_RX_CHAR_UUID
         self.client = BleakClient(
             address,
-            disconnected_callback=self.handle_disconnection,
-            services=[UART_SERVICE_UUID],
+            disconnected_callback=self._handle_disconnection,
         )
-        self.message_queue = asyncio.Queue(
-            maxsize=0
-        )  # Queue to store the last message received
+        self.uart_tx = None
+        self.uart_rx = None
         self._write_lock = asyncio.Lock()
+        self.notifications_started = False
+        self.notification_handler: Optional[Callable[[int, bytes], None]] = None
 
     async def connect(self):
-        logging.info(f"Connected to {self.name}")
-        await self.client.connect()
-        await asyncio.sleep(1)
+        logger.info(f"Connecting to {self.name} ({self.address})")
         try:
+            await self.client.connect()
+            logger.info(f"Connected to {self.name}")
+
+            # Discover services
+            await self.client.get_services()
+            services = self.client.services
+
+            uart_service = services.get_service(UART_SERVICE_UUID)
+            if not uart_service:
+                raise BleakError(f"UART service not found for {self.name}")
+
+            self.uart_tx = uart_service.get_characteristic(UART_TX_CHAR_UUID)
+            self.uart_rx = uart_service.get_characteristic(UART_RX_CHAR_UUID)
+
+            if not self.uart_tx or not self.uart_rx:
+                raise BleakError(f"UART TX/RX characteristics not found for {self.name}")
+
             await self.start_notifications()
         except Exception as e:
-            logging.error(f"Failed to start notifications: {e}")
+            logger.error(f"Error connecting to {self.name}: {e}")
+            await self.disconnect()
+            raise
 
     async def disconnect(self):
-        await self.client.disconnect()
-        logging.info(f"Disconnected from {self.name}")
+        if self.notifications_started and self.uart_rx:
+            await self.client.stop_notify(self.uart_rx)
+            self.notifications_started = False
+            logger.info(f"Stopped notifications for {self.name}")
 
-    async def handle_disconnection(self, client: BleakClient):
-        logging.warning(f"Device disconnected: {self.name}")
-        await asyncio.sleep(5)  # Wait before attempting to reconnect
-        await self.connect()
+        if self.client.is_connected:
+            await self.client.disconnect()
+            logger.info(f"Disconnected from {self.name}")
+
+    def _handle_disconnection(self, client: BleakClient):
+        logger.warning(f"Device {self.name} disconnected")
+        asyncio.create_task(self.reconnect())
+
+    async def reconnect(self):
+        retries = 3
+        for attempt in range(1, retries + 1):
+            try:
+                logger.info(f"Reconnecting to {self.name} (Attempt {attempt}/{retries})")
+                await self.connect()
+                logger.info(f"Reconnected to {self.name}")
+                return
+            except Exception as e:
+                logger.error(f"Reconnection attempt {attempt} failed: {e}")
+                await asyncio.sleep(5)
+        logger.error(f"Failed to reconnect to {self.name} after {retries} attempts")
 
     async def start_notifications(self):
-        await self.client.start_notify(self.uart_rx, self.handle_notification)
-        await asyncio.sleep(1)
+        if not self.notifications_started and self.uart_rx:
+            try:
+                await self.client.start_notify(self.uart_rx, self.handle_notification)
+                self.notifications_started = True
+                logger.info(f"Notifications started for {self.name}")
+            except Exception as e:
+                logger.error(f"Failed to start notifications for {self.name}: {e}")
 
-    async def recieve(self, sender: int, data: bytes):
-        """Handle incoming data from the device."""
-        logging.info(f"Received from {self.name}: {data.hex()}")
-        await self.message_queue.put((sender, data))
-
-    async def send(self, data: bytes, max_retries: int = 3, initial_delay: float = 0.1) -> bool:
-        """Send data with retry mechanism.
-        
-        Args:
-            data: Bytes to send
-            max_retries: Maximum number of retry attempts
-            initial_delay: Initial delay between retries (doubles with each attempt)
-        
-        Returns:
-            bool: True if send was successful, False otherwise
-        """
+    async def send(self, data: bytes) -> bool:
         if not self.client.is_connected:
-            logging.warning(f"Cannot send data, {self.name} is disconnected.")
+            logger.warning(f"Cannot send data, {self.name} is disconnected.")
             return False
 
-        async with self._write_lock:  # Ensure exclusive access
-            delay = initial_delay
-            for attempt in range(max_retries):
-                try:
-                    logging.info(f"Attempt {attempt + 1}/{max_retries} to send to {self.name}: {data.hex()}")
-                    await self.client.write_gatt_char(self.uart_tx, data)
-                    return True
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        logging.error(f"Failed to send data to {self.name} after {max_retries} attempts: {e}")
-                        return False
-                    logging.warning(f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}")
-                    await asyncio.sleep(delay)
-                    delay *= 2  # Exponential backoff
+        if not self.uart_tx:
+            logger.warning(f"No TX characteristic available for {self.name}.")
+            return False
 
+        try:
+            async with self._write_lock:
+                await self.client.write_gatt_char(self.uart_tx, data, response=True)
+            logger.info(f"Data sent to {self.name}: {data.hex()}")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending data to {self.name}: {e}")
             return False
 
     async def handle_notification(self, sender: int, data: bytes):
-        try:
-            logging.info(f"Received from {self.name}: {data.hex()}")
-            await self.recieve(sender, data)
-        except Exception as e:
-            logging.error(f"Error handling notification from {self.name}: {e}")
+        logger.info(f"Notification from {self.name}: {data.hex()}")
+        if self.notification_handler:
+            await self.notification_handler(sender, data)
 
 
 class Glass(BleDevice):
@@ -106,39 +127,37 @@ class Glass(BleDevice):
         side: str,
         heartbeat_freq: int = 5,
     ):
-        super().__init__(name=name, address=address)
+        super().__init__(name, address)
         self.side = side
-        self.heartbeat_seq = 0
         self.heartbeat_freq = heartbeat_freq
-        self._last_heartbeat_time = time.time()
+        self.heartbeat_task: Optional[asyncio.Task] = None
 
     async def start_heartbeat(self):
+        if self.heartbeat_task is None or self.heartbeat_task.done():
+            self.heartbeat_task = asyncio.create_task(self._heartbeat())
+
+    async def _heartbeat(self):
         while self.client.is_connected:
-            current_time = time.time()
-            if current_time - self._last_heartbeat_time > self.heartbeat_freq:
-                heartbeat = construct_heartbeat(self.heartbeat_seq)
-                self.heartbeat_seq += 1
+            try:
+                heartbeat = construct_heartbeat(1)
                 await self.send(heartbeat)
-                self._last_heartbeat_time = current_time
-                try:
-                    sender, recieve = await asyncio.wait_for(
-                        self.message_queue.get(), timeout=1
-                    )
-                except asyncio.TimeoutError:
-                    logging.warning(
-                        f"No response received from {self.name} within timeout."
-                    )
-                except Exception as e:
-                    logging.error(f"Error in heartbeat for {self.name}: {e}")
+                await asyncio.sleep(self.heartbeat_freq)
+            except Exception as e:
+                logger.error(f"Heartbeat error for {self.name}: {e}")
+                break
 
     async def connect(self):
         await super().connect()
-        asyncio.create_task(self.start_heartbeat())
+        await self.start_heartbeat()
 
-    async def recieve(self, sender: int, data: bytes):
-        """Handle incoming data from the device."""
-        recieve = BleReceive(lr=self.side, cmd=data[0], data=data[1:])
-        await self.message_queue.put((sender, recieve))
+    async def disconnect(self):
+        if self.heartbeat_task and not self.heartbeat_task.done():
+            self.heartbeat_task.cancel()
+            try:
+                await self.heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        await super().disconnect()
 
 
 class GlassesManager:
@@ -151,81 +170,75 @@ class GlassesManager:
         left_name: str = "G1 Left Glass",
         right_name: str = "G1 Right Glass",
     ):
-        self.left_glass = None
-        self.right_glass = None
+        self.left_glass: Optional[Glass] = (
+            Glass(name=left_name, address=left_address, side="left")
+            if left_address
+            else None
+        )
+        self.right_glass: Optional[Glass] = (
+            Glass(name=right_name, address=right_address, side="right")
+            if right_address
+            else None
+        )
 
-        self.left_address = left_address
-        self.right_address = right_address
-
-        self.left_name = left_name
-        self.right_name = right_name
-
-        self.evenai_seq = 0
-
-        if left_address and right_address:
-            # Initialize with minimal info first
-            self.left_glass = Glass(
-                name=left_name,
-                address=left_address,
-                side="left",
-            )
-            self.right_glass = Glass(
-                name=right_name,
-                address=right_address,
-                side="right",
-            )
-
-    async def connect(self):
-        if self.left_glass and self.right_glass:
-            await self.left_glass.connect()
-            await self.right_glass.connect()
-            return True
-        return False
-
-    async def scan_and_connect(self, timeout: int = 10):
+    async def scan_and_connect(self, timeout: int = 10) -> bool:
         """Scan for glasses devices and connect to them."""
-        if self.left_address and self.right_address:
-            await self.connect()
-            return True
-        attempt = 5
-        for i in range(attempt):
-            logging.info("Scanning for glasses devices...")
+        try:
+            logger.info("Scanning for glasses devices...")
             devices = await BleakScanner.discover(timeout=timeout)
             for device in devices:
-                device_name = device.name if device.name else "Unknown"
-                logging.info(f"Found device: {device_name}, Address: {device.address}")
-                if "_L_" in device_name:
-                    side = "left"
-                    self.left_name = device.name
-                    self.left_address = device.address
-                    self.left_glass = Glass(
-                        name=device.name, address=device.address, side=side
-                    )
-                if "_R_" in device_name:
-                    side = "right"
-                    self.right_name = device.name
-                    self.right_address = device.address
-                    self.right_glass = Glass(
-                        name=device.name, address=device.address, side=side
-                    )
+                device_name = device.name or "Unknown"
+                logger.info(f"Found device: {device_name}, Address: {device.address}")
+                if "_L_" in device_name and not self.left_glass:
+                    self.left_glass = Glass(name=device_name, address=device.address, side="left")
+                elif "_R_" in device_name and not self.right_glass:
+                    self.right_glass = Glass(name=device_name, address=device.address, side="right")
 
-            if self.left_glass and self.right_glass:
-                break
-            await asyncio.sleep(1)
-        for i in range(attempt):
-            try:
-                connected = await self.connect()
-                if connected:
-                    return True
-            except Exception as e:
-                logging.error(f"Error connecting to glasses: {e}")
-        return False
+            connect_tasks = []
+            if self.left_glass:
+                connect_tasks.append(asyncio.create_task(self.left_glass.connect()))
+            if self.right_glass:
+                connect_tasks.append(asyncio.create_task(self.right_glass.connect()))
 
-    async def disconnect(self):
-        await self.left_glass.disconnect()
-        await self.right_glass.disconnect()
+            if connect_tasks:
+                await asyncio.gather(*connect_tasks)
+                logger.info("All glasses connected successfully.")
+                return True
+            else:
+                logger.error("No glasses devices found during scan.")
+                return False
+        except Exception as e:
+            logger.error(f"Error during scan and connect: {e}")
+            return False
 
-    async def send(self, data: bytes):
-        # First send to left glass
-        await self.left_glass.send(data)
-        await self.right_glass.send(data)
+    async def disconnect_all(self):
+        """Disconnect from all connected glasses."""
+        disconnect_tasks = []
+        if self.left_glass and self.left_glass.client.is_connected:
+            disconnect_tasks.append(asyncio.create_task(self.left_glass.disconnect()))
+        if self.right_glass and self.right_glass.client.is_connected:
+            disconnect_tasks.append(asyncio.create_task(self.right_glass.disconnect()))
+        if disconnect_tasks:
+            await asyncio.gather(*disconnect_tasks)
+            logger.info("All glasses disconnected.")
+
+
+# Example Usage
+async def main():
+    manager = GlassesManager()
+    connected = await manager.scan_and_connect()
+    if connected:
+        try:
+            while True:
+                # Replace with your actual logic
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user.")
+        finally:
+            await manager.disconnect_all()
+    else:
+        logger.error("Failed to connect to glasses.")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

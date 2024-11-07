@@ -1,5 +1,4 @@
 from even_glasses.bluetooth_manager import (
-    BleReceive,
     Glass,
     GlassesManager
 )
@@ -11,10 +10,9 @@ from even_glasses.models import (
     Command,  
 )
 
-__version__ = "0.1.06"
+__version__ = "0.1.07"
 
 __all__ = [
-    "BleReceive",
     "Glass",
     "GlassesManager",
     "Command",

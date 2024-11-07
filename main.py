@@ -7,7 +7,9 @@ from even_glasses.models import NCSNotification, RSVPConfig
 import logging
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# Initialize GlassesManager
 manager = GlassesManager(left_address=None, right_address=None)
 
 async def main(page: ft.Page):
@@ -73,7 +75,7 @@ async def main(page: ft.Page):
         notification_header = ft.Text(
             value="Send Custom Notification", size=18, weight=ft.FontWeight.BOLD
         )
-        msg_id_input = ft.TextField(label="Message ID", width=200, value="1")
+        msg_id_input = ft.TextField(label="Message ID", width=200, value="1", keyboard_type=ft.KeyboardType.NUMBER)
         app_identifier_field = ft.TextField(
             label="App Identifier", width=400, value="org.telegram.messenger"
         )
@@ -262,7 +264,7 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     async def connect_glasses(e):
         connect_button.disabled = True
         page.update()
-        await manager.scan_and_connect()
+        connected = await manager.scan_and_connect()
         on_status_changed()
         connect_button.disabled = False
         page.update()
@@ -270,7 +272,7 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     async def disconnect_glasses(e):
         disconnect_button.disabled = True
         page.update()
-        await manager.graceful_shutdown()
+        await manager.disconnect_all()  # Updated method name
         left_status.value = "Left Glass: Disconnected"
         right_status.value = "Right Glass: Disconnected"
         log_message("Disconnected all glasses.")
@@ -281,8 +283,11 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     async def send_message(e):
         msg = message_input.value
         if msg:
-            await send_text(manager, msg)
-            log_message(f"Sent message to glasses: {msg}")
+            success = await send_text(manager, msg)
+            if success:
+                log_message(f"Sent message to glasses: {msg}")
+            else:
+                log_message(f"Failed to send message to glasses: {msg}")
             message_input.value = ""
             page.update()
 
@@ -304,10 +309,13 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 display_name=display_name,
             )
 
-            await send_notification(manager, notification)
-            log_message(
-                f"Sent notification: {json.dumps(notification.model_dump(by_alias=True), separators=(',', ':'))}"
-            )
+            success = await send_notification(manager, notification)
+            if success:
+                log_message(
+                    f"Sent notification: {json.dumps(notification.model_dump(by_alias=True), separators=(',', ':'))}"
+                )
+            else:
+                log_message("Failed to send notification.")
 
             page.update()
         except ValueError:
@@ -331,9 +339,15 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             rsvp_status.value = "RSVP Status: Running..."
             page.update()
 
-            await send_rsvp(manager, rsvp_text.value, config)
+            success = await send_rsvp(manager, rsvp_text.value, config)
 
-            rsvp_status.value = "RSVP Status: Complete"
+            if success:
+                rsvp_status.value = "RSVP Status: Complete"
+                log_message("RSVP completed successfully.")
+            else:
+                rsvp_status.value = "RSVP Status: Failed"
+                log_message("RSVP failed.")
+
             start_rsvp_button.disabled = False
             page.update()
 
