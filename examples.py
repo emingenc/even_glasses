@@ -73,7 +73,7 @@ async def main():
     args = parse_args()
 
     try:
-        with open(args.input_file, "r") as f:
+        with open(args.input_file, "r", encoding="utf-8") as f:
             text = f.read()
     except FileNotFoundError:
         logging.error(f"Input file not found: {args.input_file}")
