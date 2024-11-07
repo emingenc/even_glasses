@@ -70,11 +70,9 @@ async def send_text_packet(
 
     # Send to the left glass and wait for acknowledgment
     await manager.left_glass.send(ai_result_command)
-    await asyncio.wait_for(manager.left_glass.message_queue.get(), wait)
     await asyncio.sleep(delay)
     # Send to the right glass and wait for acknowledgment
     await manager.right_glass.send(ai_result_command)
-    await asyncio.wait_for(manager.right_glass.message_queue.get(), wait)
     # await wait_for_ack(manager.right_glass)
     manager.evenai_seq += 1
     return text_message

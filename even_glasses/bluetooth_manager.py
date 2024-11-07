@@ -3,7 +3,11 @@ import logging
 import asyncio
 from bleak import BleakClient, BleakScanner
 from even_glasses.utils import construct_heartbeat
-from even_glasses.service_identifiers import UART_SERVICE_UUID, UART_TX_CHAR_UUID, UART_RX_CHAR_UUID
+from even_glasses.service_identifiers import (
+    UART_SERVICE_UUID,
+    UART_TX_CHAR_UUID,
+    UART_RX_CHAR_UUID,
+)
 from even_glasses.models import BleReceive
 
 
@@ -23,6 +27,7 @@ class BleDevice:
         self.message_queue = asyncio.Queue(
             maxsize=0
         )  # Queue to store the last message received
+        self._write_lock = asyncio.Lock()
 
     async def connect(self):
         logging.info(f"Connected to {self.name}")
@@ -37,33 +42,58 @@ class BleDevice:
         await self.client.disconnect()
         logging.info(f"Disconnected from {self.name}")
 
-    def handle_disconnection(self, client: BleakClient):
+    async def handle_disconnection(self, client: BleakClient):
         logging.warning(f"Device disconnected: {self.name}")
-        asyncio.create_task(self.connect())
+        await asyncio.sleep(5)  # Wait before attempting to reconnect
+        await self.connect()
 
     async def start_notifications(self):
         await self.client.start_notify(self.uart_rx, self.handle_notification)
         await asyncio.sleep(1)
-
-    async def handle_notification(self, sender: int, data: bytes):
-        """Handle incoming data from the device."""
-        logging.info(f"Received from {self.name}: {data.hex()}")
-        await self.recieve(sender, data)
 
     async def recieve(self, sender: int, data: bytes):
         """Handle incoming data from the device."""
         logging.info(f"Received from {self.name}: {data.hex()}")
         await self.message_queue.put((sender, data))
 
-    async def send(self, data: bytes):
-        if self.client.is_connected:
-            try:
-                logging.info(f"Sent to {self.name}: {data.hex()}")
-                await self.client.write_gatt_char(self.uart_tx, data)
-            except Exception as e:
-                logging.error(f"Failed to send data to {self.name}: {e}")
-        else:
+    async def send(self, data: bytes, max_retries: int = 3, initial_delay: float = 0.1) -> bool:
+        """Send data with retry mechanism.
+        
+        Args:
+            data: Bytes to send
+            max_retries: Maximum number of retry attempts
+            initial_delay: Initial delay between retries (doubles with each attempt)
+        
+        Returns:
+            bool: True if send was successful, False otherwise
+        """
+        if not self.client.is_connected:
             logging.warning(f"Cannot send data, {self.name} is disconnected.")
+            return False
+
+        async with self._write_lock:  # Ensure exclusive access
+            delay = initial_delay
+            for attempt in range(max_retries):
+                try:
+                    logging.info(f"Attempt {attempt + 1}/{max_retries} to send to {self.name}: {data.hex()}")
+                    await self.client.write_gatt_char(self.uart_tx, data)
+                    return True
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logging.error(f"Failed to send data to {self.name} after {max_retries} attempts: {e}")
+                        return False
+                    logging.warning(f"Attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}")
+                    await asyncio.sleep(delay)
+                    delay *= 2  # Exponential backoff
+
+            return False
+
+    async def handle_notification(self, sender: int, data: bytes):
+        try:
+            logging.info(f"Received from {self.name}: {data.hex()}")
+            await self.recieve(sender, data)
+        except Exception as e:
+            logging.error(f"Error handling notification from {self.name}: {e}")
 
 
 class Glass(BleDevice):
@@ -90,9 +120,16 @@ class Glass(BleDevice):
                 self.heartbeat_seq += 1
                 await self.send(heartbeat)
                 self._last_heartbeat_time = current_time
-                sender, recieve = await asyncio.wait_for(
-                    self.message_queue.get(), timeout=1
-                )
+                try:
+                    sender, recieve = await asyncio.wait_for(
+                        self.message_queue.get(), timeout=1
+                    )
+                except asyncio.TimeoutError:
+                    logging.warning(
+                        f"No response received from {self.name} within timeout."
+                    )
+                except Exception as e:
+                    logging.error(f"Error in heartbeat for {self.name}: {e}")
 
     async def connect(self):
         await super().connect()
@@ -122,7 +159,7 @@ class GlassesManager:
 
         self.left_name = left_name
         self.right_name = right_name
-        
+
         self.evenai_seq = 0
 
         if left_address and right_address:
