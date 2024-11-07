@@ -97,7 +97,7 @@ class NCSNotification(BaseModel):
     )
     display_name: str = Field(..., alias="display_name", description="Display name")
 
-    class Config:
+    class ConfigDict:
         populate_by_name = True
 
 
@@ -109,9 +109,8 @@ class Notification(BaseModel):
         "Add", alias="type", description="Type of notification"
     )
 
-    class Config:
+    class ConfigDict:
         populate_by_name = True
-        allow_population_by_field_name = True
 
     def to_json(self):
         return self.model_dump(by_alias=True)
