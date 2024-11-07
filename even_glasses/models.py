@@ -1,118 +1,79 @@
-from enum import IntEnum
-from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from typing import Literal
-from datetime import datetime
 import time
+import json
+from enum import IntEnum
+from datetime import datetime
 
 
-class DeviceOrders(IntEnum):
-    DISPLAY_READY = 0x00  # 0
-    DISPLAY_BUSY = 0x11  # 17
-    DISPLAY_UPDATE = 0x0F  # 15
-    DISPLAY_COMPLETE = 0x09  # 9
-
-
-class CMD(IntEnum):
-    START_EVEN_AI = 0xF5
-    OPEN_GLASSES_MIC = 0x0E
-    MIC_RESPONSE = 0xE
-    RECEIVE_GLASSES_MIC_DATA = 0xF1
-
-    # System commands
-    BLE_REQ_INIT = 0x4D
-    BLE_REQ_HEARTBEAT = 0x25
-    SEND_AI_RESULT = 0x4E
-    BLE_REQ_QUICK_NOTE = 0x21
-    BLE_REQ_DASHBOARD = 0x22
-
-    # Notification commands
+class Command(IntEnum):
+    START_AI = 0xF5
+    OPEN_MIC = 0x0E
+    MIC_RESPONSE = 0x0E
+    RECEIVE_MIC_DATA = 0xF1
+    INIT = 0x4D
+    HEARTBEAT = 0x25
+    SEND_RESULT = 0x4E
+    QUICK_NOTE = 0x21
+    DASHBOARD = 0x22
     NOTIFICATION = 0x4B
 
 
-class StartEvenAISubCMD(IntEnum):
-    EXIT = 0x00  # Exit to dashboard manually
-    PAGE_CONTROL = 0x01  # Page up/down control in manual mode
-    START = 0x17  # Start Even AI
-    STOP = 0x18  # Stop Even AI recording
-
-    # 3, 31
-    DASHBOARD_RIGHT = 0x03  # 3 in hex is 0x03
-    DASHBOARD2 = 0x1F  # 31 in hex is 0x1F
+class SubCommand(IntEnum):
+    EXIT = 0x00
+    PAGE_CONTROL = 0x01
+    START = 0x17
+    STOP = 0x18
 
 
-class MicEnableStatus(IntEnum):
+class MicStatus(IntEnum):
     ENABLE = 0x01
     DISABLE = 0x00
 
 
 class ResponseStatus(IntEnum):
-    SUCCESS = 0xC9  # 201
-    FAILURE = 0xCA  # 202
+    SUCCESS = 0xC9
+    FAILURE = 0xCA
 
 
 class ScreenAction(IntEnum):
-    DISPLAY_NEW_CONTENT = 0x01  # Lower 4 bits
+    NEW_CONTENT = 0x01
 
 
-class EvenAIStatus(IntEnum):
-    DISPLAYING = 0x30  # Initial display
-    DISPLAY_COMPLETE = 0x40  # Final display after 3 seconds
-    MANUAL_MODE = 0x50  # Manual page turning mode
-    NETWORK_ERROR = 0x60  # Error display
+class AIStatus(IntEnum):
+    DISPLAYING = 0x30  # Even AI displaying (automatic mode default)
+    DISPLAY_COMPLETE = 0x40  # Even AI display complete (last page of automatic mode)
+    MANUAL_MODE = 0x50  # Even AI manual mode
+    NETWORK_ERROR = 0x60  # Even AI network error
 
 
-class StartEvenAI(BaseModel):
-    cmd: CMD = Field(CMD.START_EVEN_AI, description="Start Even AI command")
-    subcmd: StartEvenAISubCMD = Field(..., description="Subcommand")
-    param: bytes = Field(
-        b"", description="Specific parameters associated with each subcommand"
-    )
+class SendResult(BaseModel):
+    command: int = Field(default=Command.SEND_RESULT)
+    seq: int = Field(default=0)
+    total_packages: int = Field(default=0)
+    current_package: int = Field(default=0)
+    screen_status: int = Field(default=ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING)
+    new_char_pos0: int = Field(default=0)
+    new_char_pos1: int = Field(default=0)
+    page_number: int = Field(default=1)
+    max_pages: int = Field(default=1)
+    data: bytes = Field(default=b"")
 
-
-class OpenGlassesMic(BaseModel):
-    cmd: CMD = Field(CMD.OPEN_GLASSES_MIC, description="Open Glasses Mic command")
-    enable: MicEnableStatus = Field(..., description="Enable or disable the MIC")
-
-
-class OpenGlassesMicResponse(BaseModel):
-    cmd: CMD = Field(CMD.OPEN_GLASSES_MIC, description="Open Glasses Mic response")
-    rsp_status: ResponseStatus = Field(..., description="Response Status")
-    enable: MicEnableStatus = Field(..., description="MIC status after response")
-
-
-class ReceiveGlassesMicData(BaseModel):
-    cmd: CMD = Field(
-        CMD.RECEIVE_GLASSES_MIC_DATA, description="Receive Glasses Mic data"
-    )
-    seq: int = Field(..., ge=0, le=255, description="Sequence Number (0-255)")
-    data: bytes = Field(..., description="Audio Data captured by the MIC")
-
-
-class SendAIResult(BaseModel):
-    cmd: CMD = Field(CMD.SEND_AI_RESULT, description="Send AI Result command")
-    seq: int = Field(0, ge=0, le=255, description="Sequence Number (0-255)")
-    total_package_num: int = Field(
-        191, ge=1, le=255, description="Total number of packages being sent"
-    )
-    current_package_num: int = Field(
-        ..., ge=0, le=255, description="Current package number in transmission"
-    )
-    newscreen: int = Field(1, description="Combined Screen Status byte")
-    current_page_num: int = Field(..., ge=0, le=255, description="Current page number")
-    max_page_num: int = Field(20, ge=1, le=255, description="Total number of pages")
-    new_char_pos0: int = Field(
-        0, ge=0, le=255, description="Higher 8 bits of new character position"
-    )
-    new_char_pos1: int = Field(
-        0, ge=0, le=255, description="Lower 8 bits of new character position"
-    )
-
-    def set_newscreen(self, screen_action: ScreenAction, even_ai_status: EvenAIStatus):
-        """
-        Combines ScreenAction and EvenAIStatus into a single byte for the newscreen field.
-        """
-        self.newscreen = screen_action.value | even_ai_status.value
+    def build(self) -> bytes:
+        header = bytes(
+            [
+                self.command,
+                self.seq,
+                self.total_packages,
+                self.current_package,
+                self.screen_status,
+                self.new_char_pos0,
+                self.new_char_pos1,
+                self.page_number,
+                self.max_pages,
+            ]
+        )
+        return header + self.data
 
 
 class NCSNotification(BaseModel):
@@ -146,30 +107,42 @@ class Notification(BaseModel):
     )
     type: Literal["Add"] = Field(
         "Add", alias="type", description="Type of notification"
-    )  # noqa: F821
+    )
 
     class ConfigDict:
         populate_by_name = True
 
+    def to_json(self):
+        return self.model_dump(by_alias=True)
 
-def create_notification(msg_id, app_identifier, title, subtitle, message, display_name):
-    notification = Notification(
-        ncs_notification=NCSNotification(
-            msg_id=msg_id,
-            app_identifier=app_identifier,
-            title=title,
-            subtitle=subtitle,
-            message=message,
-            display_name=display_name,
-        )
-    )
-    return notification
+    def to_bytes(self):
+        return json.dumps(self.to_json()).encode("utf-8")
+
+    async def construct_notification(self):
+        json_bytes = self.to_bytes()
+        max_chunk_size = 180 - 4  # Subtract 4 bytes for header
+        chunks = [
+            json_bytes[i : i + max_chunk_size]
+            for i in range(0, len(json_bytes), max_chunk_size)
+        ]
+        total_chunks = len(chunks)
+        encoded_chunks = []
+        for index, chunk in enumerate(chunks):
+            notify_id = 0  # Set appropriate notification ID
+            header = bytes([Command.NOTIFICATION, notify_id, total_chunks, index])
+            encoded_chunk = header + chunk
+            encoded_chunks.append(encoded_chunk)
+        return encoded_chunks
 
 
-@dataclass
-class RSVPConfig:
-    words_per_group: int = 1
-    wpm: int = 250
-    padding_char: str = "..."
-    max_retries: int = 3
-    retry_delay: float = 0.5
+class RSVPConfig(BaseModel):
+    words_per_group: int = Field(default=1)
+    wpm: int = Field(default=250)
+    padding_char: str = Field(default="...")
+
+
+class BleReceive(BaseModel):
+    lr: str = Field(default="L", description="Left or Right")
+    cmd: int = Field(default=0x00)
+    data: bytes = Field(default_factory=bytes)
+    is_timeout: bool = Field(default=False)
