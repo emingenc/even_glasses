@@ -2,9 +2,9 @@ import time
 import logging
 import asyncio
 from bleak import BleakClient, BleakScanner
-from utils import construct_heartbeat
-from service_identifiers import UART_SERVICE_UUID, UART_TX_CHAR_UUID, UART_RX_CHAR_UUID
-from models import BleReceive
+from even_glasses.utils import construct_heartbeat
+from even_glasses.service_identifiers import UART_SERVICE_UUID, UART_TX_CHAR_UUID, UART_RX_CHAR_UUID
+from even_glasses.models import BleReceive
 
 
 class BleDevice:

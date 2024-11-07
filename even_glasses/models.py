@@ -4,6 +4,7 @@ from enum import IntEnum
 from dataclasses import dataclass
 from datetime import datetime
 import time
+import json
 
 
 class Command(IntEnum):
@@ -12,7 +13,7 @@ class Command(IntEnum):
     MIC_RESPONSE = 0x0E
     RECEIVE_MIC_DATA = 0xF1
     INIT = 0x4D
-    HEARTBEAT = 0x25 
+    HEARTBEAT = 0x25
     SEND_RESULT = 0x4E
     QUICK_NOTE = 0x21
     DASHBOARD = 0x22
@@ -39,11 +40,12 @@ class ResponseStatus(IntEnum):
 class ScreenAction(IntEnum):
     NEW_CONTENT = 0x01
 
+
 class AIStatus(IntEnum):
     DISPLAYING = 0x30  # Even AI displaying（automatic mode default）
-    DISPLAY_COMPLETE = 0x40 # Even AI display complete ( last page of automatic mode)
-    MANUAL_MODE = 0x50 # Even AI manual mode
-    NETWORK_ERROR = 0x60 # Even AI network error
+    DISPLAY_COMPLETE = 0x40  # Even AI display complete ( last page of automatic mode)
+    MANUAL_MODE = 0x50  # Even AI manual mode
+    NETWORK_ERROR = 0x60  # Even AI network error
 
 
 @dataclass
@@ -100,13 +102,45 @@ class Notification:
             "display_name": self.display_name,
         }
 
+    def to_json(self):
+        return json.dumps(self.to_dict())
+
+    def to_bytes(self):
+        return self.to_json().encode("utf-8")
+
+    async def construct_notification(self):
+        json_bytes = self.to_bytes()
+
+        # Split the data into chunks of 176 bytes (180 bytes total minus 4-byte header)
+        max_chunk_size = 180 - 4  # Subtracting 4 bytes for header
+        chunks = [
+            json_bytes[i : i + max_chunk_size]
+            for i in range(0, len(json_bytes), max_chunk_size)
+        ]
+
+        total_chunks = len(chunks)
+        encoded_chunks = []
+        for index, chunk in enumerate(chunks):
+            notify_id = 0
+
+            # Construct the header matching the debug output
+            header = bytes([Command.NOTIFICATION, notify_id, total_chunks, index])
+
+            # Debugging: Print the header values
+            print(f"Header Bytes: {[hex(b) for b in header]}")
+
+            encoded_chunk = header + chunk
+            encoded_chunks.append(encoded_chunk)
+        return encoded_chunks
+
 
 @dataclass
 class RSVPConfig:
     words_per_group: int = 1
     wpm: int = 250
     padding_char: str = "..."
-    
+
+
 class BleReceive:
     """BLE Receive Data Structure."""
 

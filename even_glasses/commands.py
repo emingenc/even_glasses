@@ -1,4 +1,4 @@
-from models import (
+from even_glasses.models import (
     Command,
     SubCommand,
     MicStatus,
@@ -6,6 +6,7 @@ from models import (
     ScreenAction,
     AIStatus,
     RSVPConfig,
+    Notification
 )
 import asyncio
 import logging
@@ -173,3 +174,14 @@ async def send_rsvp(manager, text: str, config: RSVPConfig):
         logging.error(f"Error in RSVP display: {e}")
         await send_text(manager, "--")  # Try to clear display
         return False
+    
+
+
+async def send_notification(manager, notification: Notification):
+    """Send a notification to the glasses."""
+    notification_chunks = await notification.construct_notification()
+    for chunk in notification_chunks:
+            await manager.left_glass.send(chunk)
+            await manager.right_glass.send(chunk)
+            print(f"Sent chunk to glasses: {chunk}")
+            await asyncio.sleep(0.01)  # Small delay between chunks

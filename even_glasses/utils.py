@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import struct
-from models import Command, ResponseStatus
+from even_glasses.models import Command, ResponseStatus
 
 
 async def wait_for_ack(device, timeout: int = 5):

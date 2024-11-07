@@ -1,30 +1,24 @@
-from even_glasses.ble_manager import (
+from even_glasses.bluetooth_manager import (
     BleReceive,
     Glass,
-    EvenGlass,
-    GlassesProtocol,
-)
-from even_glasses.models import (
-    CMD,
-    ScreenAction,
-    EvenAIStatus,
-    Notification,
-    NCSNotification,
-    RSVPConfig,
+    GlassesManager
 )
 
+from even_glasses.models import (
+    ScreenAction,
+    Notification,
+    RSVPConfig,
+    Command,  
+)
 
 __version__ = "0.1.05"
 
 __all__ = [
     "BleReceive",
     "Glass",
-    "EvenGlass",
-    "GlassesProtocol",
-    "CMD",
+    "GlassesManager",
+    "Command",
     "ScreenAction",
-    "EvenAIStatus",
     "Notification",
-    "NCSNotification",
     "RSVPConfig",
 ]
