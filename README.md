@@ -36,6 +36,9 @@ python3 examples.py --text
 
 # Run text test with custom text
 python3 examples.py --text --input-file custom.txt
+
+# Run notification test
+python3 examples.py --notification
 ```
 
 
