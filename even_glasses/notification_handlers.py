@@ -220,15 +220,20 @@ command_logger = CommandLogger()
 def debug_command_logs(sender: UUID | int | str, data: bytes | bytearray):
     # Log the command first
     cmd_log = command_logger.log_command(sender, data)
-    print(f"Command received: {json.dumps(cmd_log, indent=2)}")
+    
+    # Create serializable version of cmd_log
+    serializable_log = {
+        "command": cmd_log["command"],
+        "timestamps": list(cmd_log["timestamps"])  # Convert deque to list
+    }
+    
+    print(f"Command received: {json.dumps(serializable_log, indent=2)}")
 
     # Rest of your existing notification handling code...
     sender_key = str(sender)
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     if isinstance(data, bytearray):
         data = bytes(data)
-
     message = data.decode("utf-8", errors="ignore")
     data_hex = data.hex()
 
@@ -239,13 +244,12 @@ async def handle_incoming_notification(
 ):
     if DEBUG:
         debug_command_logs(sender, data)
+    
     # Your existing notification handling code...
     sender_key = str(sender)
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     if isinstance(data, bytearray):
         data = bytes(data)
-
     message = data.decode("utf-8", errors="ignore")
     data_hex = data.hex()
     print(f"Received notification from {sender_key}: {message}")
