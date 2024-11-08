@@ -13,7 +13,7 @@ from even_glasses.models import (
     AIStatus,
 )
 
-DEBUG = True
+DEBUG = False
 
 
 class CommandLogger:
