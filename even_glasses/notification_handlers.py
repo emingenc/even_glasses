@@ -1,4 +1,5 @@
 import json
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Union, List
@@ -16,6 +17,8 @@ DEBUG = True
 
 
 class CommandLogger:
+    MAX_TIMESTAMPS = 5  # Keep only last 5 timestamps
+    
     COMMAND_TYPES = {
         Command.START_AI: "Start Even AI",
         Command.OPEN_MIC: "Mic Control",
@@ -31,12 +34,13 @@ class CommandLogger:
 
     def __init__(self):
         self.data_dir = Path(
-            "/Users/emin/Documents/even_glasses/even_glasses/notification_logs"
+            "./notification_logs"
         )
         self.data_dir.mkdir(exist_ok=True)
         self.log_file = self.data_dir / "notification_logs.json"
         self.command_history: Dict[str, List[Dict]] = {}
         self._load_existing_logs()
+        self.command_history: Dict[str, Dict[str, Dict]] = {}
 
     def _parse_command(self, data: bytes) -> Dict:
         if not data:
@@ -144,7 +148,6 @@ class CommandLogger:
         }
 
     def log_command(self, sender: Union[UUID, int, str], data: Union[bytes, bytearray]):
-        """Log command with unique command tracking"""
         sender_key = str(sender)
         if isinstance(data, bytearray):
             data = bytes(data)
@@ -152,13 +155,8 @@ class CommandLogger:
         parsed_cmd = self._parse_command(data)
         current_time = parsed_cmd["timestamp"]
 
-        # Create unique command identifier
         cmd_identifier = json.dumps(
-            {
-                k: v
-                for k, v in parsed_cmd.items()
-                if k != "timestamp"  # Exclude timestamp from identifier
-            },
+            {k: v for k, v in parsed_cmd.items() if k != "timestamp"},
             sort_keys=True,
         )
 
@@ -166,31 +164,27 @@ class CommandLogger:
             self.command_history[sender_key] = {}
 
         if cmd_identifier not in self.command_history[sender_key]:
-            # New unique command
+            # New command - initialize with deque
             self.command_history[sender_key][cmd_identifier] = {
                 "command": parsed_cmd,
-                "timestamps": [current_time],
+                "timestamps": deque([current_time], maxlen=self.MAX_TIMESTAMPS)
             }
         else:
-            # Existing command, just update timestamps
-            self.command_history[sender_key][cmd_identifier]["timestamps"].append(
-                current_time
-            )
+            # Existing command - append timestamp to deque
+            self.command_history[sender_key][cmd_identifier]["timestamps"].append(current_time)
 
         self._save_logs()
-
-        # Return the full entry with all timestamps
         return self.command_history[sender_key][cmd_identifier]
 
     def _save_logs(self):
-        """Save logs in the new format"""
         try:
             serializable_history = {}
             for sender, commands in self.command_history.items():
                 serializable_history[sender] = []
                 for cmd_data in commands.values():
                     entry = cmd_data["command"].copy()
-                    entry["timestamps"] = cmd_data["timestamps"]
+                    # Convert deque to list for serialization
+                    entry["timestamps"] = list(cmd_data["timestamps"])
                     serializable_history[sender].append(entry)
 
             with open(self.log_file, "w") as f:
@@ -199,7 +193,6 @@ class CommandLogger:
             print(f"Error saving command logs: {e}")
 
     def _load_existing_logs(self):
-        """Load logs in the new format"""
         if self.log_file.exists():
             try:
                 with open(self.log_file, "r") as f:
@@ -211,9 +204,11 @@ class CommandLogger:
                         for entry in commands:
                             timestamps = entry.pop("timestamps", [])
                             cmd_identifier = json.dumps(entry, sort_keys=True)
+                            # Convert timestamps list to deque
                             self.command_history[sender][cmd_identifier] = {
                                 "command": entry,
-                                "timestamps": timestamps,
+                                "timestamps": deque(timestamps[-self.MAX_TIMESTAMPS:], 
+                                                 maxlen=self.MAX_TIMESTAMPS)
                             }
             except json.JSONDecodeError:
                 self.command_history = {}
