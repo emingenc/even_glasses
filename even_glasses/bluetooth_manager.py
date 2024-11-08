@@ -29,7 +29,6 @@ class BleDevice:
         self.uart_rx = None
         self._write_lock = asyncio.Lock()
         self.notifications_started = False
-        self.notification_handler: Optional[Callable[[int, bytes], None]] = None
 
     async def connect(self):
         logger.info(f"Connecting to {self.name} ({self.address})")
@@ -112,9 +111,7 @@ class BleDevice:
             return False
 
     async def handle_notification(self, sender: int, data: bytes):
-        logger.info(f"Notification from {self.name}: {data.hex()}")
-        if self.notification_handler:
-            await self.notification_handler(sender, data)
+        ...
 
 
 class Glass(BleDevice):
@@ -131,6 +128,8 @@ class Glass(BleDevice):
         self.side = side
         self.heartbeat_freq = heartbeat_freq
         self.heartbeat_task: Optional[asyncio.Task] = None
+        self.notification_handler: Optional[Callable[[int, bytes], None]] = None
+        
 
     async def start_heartbeat(self):
         if self.heartbeat_task is None or self.heartbeat_task.done():
@@ -158,6 +157,11 @@ class Glass(BleDevice):
             except asyncio.CancelledError:
                 pass
         await super().disconnect()
+    
+    async def handle_notification(self, sender: int, data: bytes):
+        logger.info(f"Notification from {self.name}: {data.hex()}")
+        if self.notification_handler:
+            await self.notification_handler(sender, data,self.side)
 
 
 class GlassesManager:

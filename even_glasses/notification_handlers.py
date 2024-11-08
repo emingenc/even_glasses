@@ -1,4 +1,5 @@
 import json
+import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -147,8 +148,8 @@ class CommandLogger:
             "command": {"type": "Error"},
         }
 
-    def log_command(self, sender: Union[UUID, int, str], data: Union[bytes, bytearray]):
-        sender_key = str(sender)
+    def log_command(self, sender: Union[UUID, int, str], data: Union[bytes, bytearray], side: str) -> Dict:
+        sender_key = f"{sender} {side}"
         if isinstance(data, bytearray):
             data = bytes(data)
 
@@ -190,7 +191,7 @@ class CommandLogger:
             with open(self.log_file, "w") as f:
                 json.dump(serializable_history, f, indent=2)
         except Exception as e:
-            print(f"Error saving command logs: {e}")
+            logging.debug(f"Error saving command logs: {e}")
 
     def _load_existing_logs(self):
         if self.log_file.exists():
@@ -217,40 +218,36 @@ class CommandLogger:
 command_logger = CommandLogger()
 
 
-def debug_command_logs(sender: UUID | int | str, data: bytes | bytearray):
+def debug_command_logs(sender: UUID | int | str, data: bytes | bytearray, side: str):
     # Log the command first
-    cmd_log = command_logger.log_command(sender, data)
+    cmd_log = command_logger.log_command(sender, data, side)
     
     # Create serializable version of cmd_log
     serializable_log = {
+        "side": side,
         "command": cmd_log["command"],
         "timestamps": list(cmd_log["timestamps"])  # Convert deque to list
     }
     
-    print(f"Command received: {json.dumps(serializable_log, indent=2)}")
+    logging.debug(f"Command received: {json.dumps(serializable_log, indent=2)}")
 
     # Rest of your existing notification handling code...
-    sender_key = str(sender)
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(data, bytearray):
         data = bytes(data)
-    message = data.decode("utf-8", errors="ignore")
-    data_hex = data.hex()
 
 
 # Modify handle_incoming_notification to include command logging
 async def handle_incoming_notification(
-    sender: UUID | int | str, data: bytes | bytearray
+    sender: UUID | int | str, data: bytes | bytearray, side: str
 ):
     if DEBUG:
-        debug_command_logs(sender, data)
+        debug_command_logs(sender, data, side)
     
     # Your existing notification handling code...
     sender_key = str(sender)
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(data, bytearray):
         data = bytes(data)
     message = data.decode("utf-8", errors="ignore")
     data_hex = data.hex()
-    print(f"Received notification from {sender_key}: {message}")
-    print(f"Notification data (hex): {data_hex}")
+    logging.debug(f"Received notification from {sender_key}: {message}")
+    logging.debug(f"Notification data (hex): {data_hex}")
