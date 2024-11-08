@@ -161,7 +161,7 @@ class Glass(BleDevice):
     async def handle_notification(self, sender: int, data: bytes):
         logger.info(f"Notification from {self.name}: {data.hex()}")
         if self.notification_handler:
-            await self.notification_handler(sender, data,self.side)
+            await self.notification_handler(self,sender, data)
 
 
 class GlassesManager:
