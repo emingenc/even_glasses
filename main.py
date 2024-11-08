@@ -4,6 +4,8 @@ import flet as ft
 from even_glasses.bluetooth_manager import GlassesManager
 from even_glasses.commands import send_text, send_rsvp, send_notification
 from even_glasses.models import NCSNotification, RSVPConfig
+from even_glasses.notification_handlers import handle_incoming_notification
+
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -265,6 +267,14 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         connect_button.disabled = True
         page.update()
         connected = await manager.scan_and_connect()
+
+        if connected:
+            # Assign notification handlers
+            if manager.left_glass:
+                manager.left_glass.notification_handler = handle_incoming_notification
+            if manager.right_glass:
+                manager.right_glass.notification_handler = handle_incoming_notification
+
         on_status_changed()
         connect_button.disabled = False
         page.update()
