@@ -3,6 +3,7 @@ import logging
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 from typing import Optional, Callable
+from even_glasses.models import DesiredConnectionState
 
 from even_glasses.utils import construct_heartbeat
 from even_glasses.service_identifiers import (
@@ -29,6 +30,7 @@ class BleDevice:
         self.uart_rx = None
         self._write_lock = asyncio.Lock()
         self.notifications_started = False
+        self.desired_connection_state = DesiredConnectionState.DISCONNECTED
 
     async def connect(self):
         logger.info(f"Connecting to {self.name} ({self.address})")
@@ -57,18 +59,29 @@ class BleDevice:
             raise
 
     async def disconnect(self):
-        if self.notifications_started and self.uart_rx:
-            await self.client.stop_notify(self.uart_rx)
-            self.notifications_started = False
-            logger.info(f"Stopped notifications for {self.name}")
+        """Gracefully disconnect from the BLE device, stopping notifications if they are active."""
+        try:
+            # Check if notifications are started and `uart_rx` exists before stopping them
+            if self.notifications_started and self.uart_rx:
+                try:
+                    await self.client.stop_notify(self.uart_rx)
+                    logger.info(f"Stopped notifications for {self.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to stop notifications for {self.name}: {e}")
+                finally:
+                    self.notifications_started = False
 
-        if self.client.is_connected:
-            await self.client.disconnect()
-            logger.info(f"Disconnected from {self.name}")
+            # Check if the client is still connected before attempting to disconnect
+            if self.client.is_connected:
+                await self.client.disconnect()
+                logger.info(f"Disconnected from {self.name}")
+        except Exception as e:
+            logger.error(f"Error during disconnection for {self.name}: {e}")
 
     def _handle_disconnection(self, client: BleakClient):
         logger.warning(f"Device {self.name} disconnected")
-        asyncio.create_task(self.reconnect())
+        if self.desired_connection_state == DesiredConnectionState.CONNECTED:
+            asyncio.create_task(self.reconnect())
 
     async def reconnect(self):
         retries = 3
@@ -205,6 +218,7 @@ class GlassesManager:
                 connect_tasks.append(asyncio.create_task(self.right_glass.connect()))
 
             if connect_tasks:
+                self.desired_connection_state = DesiredConnectionState.CONNECTED
                 await asyncio.gather(*connect_tasks)
                 logger.info("All glasses connected successfully.")
                 return True
@@ -223,8 +237,12 @@ class GlassesManager:
         if self.right_glass and self.right_glass.client.is_connected:
             disconnect_tasks.append(asyncio.create_task(self.right_glass.disconnect()))
         if disconnect_tasks:
-            await asyncio.gather(*disconnect_tasks)
-            logger.info("All glasses disconnected.")
+            try:
+                self.desired_connection_state = DesiredConnectionState.DISCONNECTED
+                await asyncio.gather(*disconnect_tasks)
+                logger.info("All glasses disconnected.")
+            except Exception as e:
+                logger.error(f"Error during disconnecting all glasses: {e}")
 
 
 # Example Usage
