@@ -5,6 +5,7 @@ from even_glasses.bluetooth_manager import GlassesManager
 from even_glasses.commands import send_text, send_rsvp, send_notification
 from even_glasses.models import RSVPConfig, NCSNotification
 from even_glasses.notification_handlers import handle_incoming_notification
+from stockdex import Ticker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ def parse_args():
     test_type = parser.add_mutually_exclusive_group(required=True)
     test_type.add_argument("--rsvp", action="store_true", help="Run RSVP test")
     test_type.add_argument("--text", action="store_true", help="Run text test")
+    test_type.add_argument("--ticker", action="store_true", help="Run ticker test")
     test_type.add_argument(
         "--notification", action="store_true", help="Run notification test"
     )
@@ -61,6 +63,22 @@ async def test_text(manager: GlassesManager, text: str):
         logger.error("Could not connect to glasses devices.")
         return
     await send_text(manager, text)
+    
+async def test_ticker(manager: GlassesManager, text=["SOFI"]):
+    if not manager.left_glass or not manager.right_glass:
+        logger.error("Could not connect to glasses devices.")
+        return
+    printtext = ""
+    for tickerName in text:
+        ticker = Ticker(ticker=tickerName)
+        text2 = ticker.yahoo_api_price(range='5m')
+        cp= round(text2.iloc[1][2], 2)
+        lp= round(text2.iloc[0][2], 2)
+        
+        printtext = printtext +" \n " + tickerName + " - " +str(cp) + " \\ "+ str(round((((cp/lp)-1)*100), 2)) +"%"
+        await asyncio.sleep(20)
+    await send_text(manager, printtext, duration=120)
+    await asyncio.sleep(30)
 
 
 async def test_notification(manager: GlassesManager, notification: NCSNotification):
@@ -103,6 +121,8 @@ async def main():
                 elif args.text:
                     message = f"Test message {counter}"
                     await test_text(manager=manager, text=message)
+                elif args.ticker:
+                    await test_ticker(manager=manager, text=["SOFI", "CRWD", "LCID", "XRAY"])
                 elif args.notification:
                     notification = NCSNotification(
                         msg_id=1,
@@ -110,7 +130,7 @@ async def main():
                         subtitle="Test Notification Subtitle",
                         message="This is a test notification",
                         display_name="Test Notification",
-                        app_identifier="org.telegram.messenger",
+                        app_identifier="com.google.android.gm",
                     )
                     await test_notification(manager=manager, notification=notification)
                 counter += 1
