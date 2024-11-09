@@ -5,6 +5,9 @@ import json
 from enum import IntEnum
 from datetime import datetime
 
+class DesiredConnectionState(IntEnum):
+    DISCONNECTED = 0x00
+    CONNECTED = 0x01
 
 class Command(IntEnum):
     START_AI = 0xF5
