@@ -1,3 +1,4 @@
 bleak>=0.22.3
 flet>=0.24.1
 pydantic>=2.9.2
+stockdex
