@@ -189,3 +189,4 @@ async def send_notification(manager, notification: NCSNotification):
             await manager.right_glass.send(chunk)
             print(f"Sent chunk to glasses: {chunk}")
             await asyncio.sleep(0.01)  # Small delay between chunks
+            
