@@ -12,8 +12,19 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize GlassesManager
-manager = GlassesManager(left_address=None, right_address=None)
+# Add near the top of the file, before creating the manager
+async def log_message(message: str):
+    global page, log_output
+    if page and log_output:
+        log_output.value = f"{time.strftime('%H:%M:%S')} - {message}\n{log_output.value}"
+        await page.update_async()
+
+# Initialize GlassesManager with log callback
+manager = GlassesManager(
+    left_address=None,
+    right_address=None,
+    log_callback=log_message
+)
 
 # Add near the top of the main() function, before creating sections
 log_output = ft.Text(
@@ -25,11 +36,6 @@ log_output = ft.Text(
 
 # Make page a global variable
 page = None
-
-def log_message(message: str):
-    global page
-    log_output.value = f"{time.strftime('%H:%M:%S')} - {message}\n{log_output.value}"
-    page.update()
 
 def create_status_section():
     status_header = ft.Text(
@@ -271,9 +277,14 @@ def create_pomodoro_section():
         keyboard_type=ft.KeyboardType.NUMBER
     )
 
-    start_pomodoro = ft.ElevatedButton(text="Start Pomodoro", disabled=True)
+    start_pomodoro = ft.ElevatedButton(text="Start Pomodoro")
     stop_pomodoro = ft.ElevatedButton(text="Stop Pomodoro", disabled=True)
-    skip_phase = ft.ElevatedButton(text="Skip Phase", disabled=True)
+    skip_phase = ft.ElevatedButton(
+        text="Skip Phase",
+        visible=True,  # Keep visible
+        bgcolor=ft.colors.BLUE_400,
+        disabled=True  # Start disabled
+    )
     
     pomodoro_status = ft.Text(value="Pomodoro: Ready", size=14)
     cycle_count = ft.Text(value="Cycle: 0/4", size=14)
@@ -290,6 +301,13 @@ def create_pomodoro_section():
         value="Simple"
     )
 
+    # Create the row with all three buttons
+    button_row = ft.Row(
+        [start_pomodoro, stop_pomodoro, skip_phase],
+        alignment=ft.MainAxisAlignment.CENTER,
+        spacing=20,
+    )
+
     return ft.Column([
         pomodoro_header,
         ft.Row(
@@ -302,11 +320,7 @@ def create_pomodoro_section():
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=20,
         ),
-        ft.Row(
-            [start_pomodoro, stop_pomodoro, skip_phase],
-            alignment=ft.MainAxisAlignment.CENTER,
-            spacing=20,
-        ),
+        button_row,  # Use the button row here
         ft.Row(
             [pomodoro_status, cycle_count, phase_indicator],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -315,8 +329,25 @@ def create_pomodoro_section():
     ], spacing=10), work_duration, short_break, long_break, cycles_before_long, start_pomodoro, stop_pomodoro, skip_phase, pomodoro_status, cycle_count, phase_indicator, auto_start_breaks, notification_type
 
 async def main(page_: ft.Page):
-    global page
+    global page, manager
     page = page_
+
+    # Create log output first
+    log_output = ft.Text(
+        size=12,
+        selectable=True,
+        no_wrap=True,
+        max_lines=5,
+    )
+
+    # Define log message function
+    async def log_message(message: str):
+        log_output.value = f"{time.strftime('%H:%M:%S')} - {message}\n{log_output.value}"
+        await page.update_async()
+
+    # Initialize manager with callback
+    manager = GlassesManager(log_callback=log_message)
+
     page.title = "Glasses Control Panel"
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.padding = 20
@@ -329,40 +360,56 @@ async def main(page_: ft.Page):
     current_cycle = 0
     is_break = False
 
-    # Create all sections first
-    status_section, left_status, right_status = create_status_section()
+    # Create connection buttons first
     connection_buttons, connect_button, disconnect_button = create_connection_buttons()
+    
+    # Create status section
+    status_section, left_status, right_status = create_status_section()
+    # connection_buttons, connect_button, disconnect_button = create_connection_buttons()
     message_section, message_input, send_button = create_message_section()
     notification_section, msg_id_input, app_identifier_field, title_input, subtitle_input, notification_message_input, display_name_input, send_notification_button, notification_preset = create_notification_section()
     rsvp_section, words_per_group, wpm_input, padding_char, rsvp_text, start_rsvp_button, rsvp_status = create_rsvp_section()
     timer_section, minutes_input, seconds_input, start_timer_button, stop_timer_button, timer_status, silent_mode, status_indicator, completion_type = create_timer_section()
     pomodoro_section, work_duration, short_break, long_break, cycles_before_long, start_pomodoro, stop_pomodoro, skip_phase, pomodoro_status, cycle_count, phase_indicator, auto_start_breaks, notification_type = create_pomodoro_section()
 
-    # Create AppBar with status
+    # Initialize button states
+    stop_pomodoro.disabled = True
+    skip_phase.disabled = True
+    # start_pomodoro.disabled = True  # Will be enabled by on_status_changed when connected
+
+    # Create AppBar with status and connection buttons
     page.appbar = ft.AppBar(
         leading=ft.Icon(ft.icons.VISIBILITY),
         leading_width=40,
         title=status_section,
         center_title=True,
         bgcolor=ft.colors.SURFACE_VARIANT,
+        actions=[
+            connect_button,
+            disconnect_button,
+        ],
     )
+
+    # Create all sections first
+    message_section, message_input, send_button = create_message_section()
+    notification_section, msg_id_input, app_identifier_field, title_input, subtitle_input, notification_message_input, display_name_input, send_notification_button, notification_preset = create_notification_section()
+    rsvp_section, words_per_group, wpm_input, padding_char, rsvp_text, start_rsvp_button, rsvp_status = create_rsvp_section()
+    timer_section, minutes_input, seconds_input, start_timer_button, stop_timer_button, timer_status, silent_mode, status_indicator, completion_type = create_timer_section()
+    pomodoro_section, work_duration, short_break, long_break, cycles_before_long, start_pomodoro, stop_pomodoro, skip_phase, pomodoro_status, cycle_count, phase_indicator, auto_start_breaks, notification_type = create_pomodoro_section()
+
+    # Initialize button states
+    stop_pomodoro.disabled = True
+    skip_phase.disabled = True
+    # start_pomodoro.disabled = True  # Will be enabled by on_status_changed when connected
 
     # Define all your async functions here
     async def connect_glasses(e):
-        connect_button.disabled = True
-        page.update()
-        connected = await manager.scan_and_connect()
-
-        if connected:
-            # Assign notification handlers
-            if manager.left_glass:
-                manager.left_glass.notification_handler = handle_incoming_notification
-            if manager.right_glass:
-                manager.right_glass.notification_handler = handle_incoming_notification
-
-        on_status_changed()
-        connect_button.disabled = False
-        page.update()
+        try:
+            connected = await manager.scan_and_connect()
+            if connected:
+                on_status_changed()
+        except Exception as e:
+            await log_message(f"Error connecting: {str(e)}")
 
     async def disconnect_glasses(e):
         disconnect_button.disabled = True
@@ -601,23 +648,25 @@ async def main(page_: ft.Page):
         skip_phase.disabled = True
         page.update()
 
-    async def start_pomodoro(e):
-        nonlocal pomodoro_task
+    async def start_pomodoro_handler(e):
+        nonlocal pomodoro_task, current_cycle, is_break
         try:
+            log_message("Starting pomodoro...")
+            
             # Get durations
             work_mins = int(work_duration.value)
             short_mins = int(short_break.value)
             long_mins = int(long_break.value)
             max_cycles = int(cycles_before_long.value)
             
-            if any(x <= 0 for x in [work_mins, short_mins, long_mins, max_cycles]):
-                log_message("Please enter valid positive numbers for all durations")
-                return
-            
             # Update button states
             start_pomodoro.disabled = True
             stop_pomodoro.disabled = False
             skip_phase.disabled = False
+            
+            log_message("Enabling skip button")
+            
+            # Force update the page
             page.update()
             
             # Start the pomodoro timer
@@ -625,10 +674,10 @@ async def main(page_: ft.Page):
                 update_pomodoro_display(work_mins, short_mins, long_mins, max_cycles)
             )
             
-        except ValueError:
-            log_message("Please enter valid numbers for all durations")
+        except Exception as e:
+            log_message(f"Error in start_pomodoro: {str(e)}")
 
-    async def stop_pomodoro(e):
+    async def stop_pomodoro_handler(e):
         nonlocal pomodoro_task, current_cycle, is_break
         if pomodoro_task:
             pomodoro_task.cancel()
@@ -641,11 +690,12 @@ async def main(page_: ft.Page):
             cycle_count.value = f"Cycle: 0/{cycles_before_long.value}"
             start_pomodoro.disabled = False
             stop_pomodoro.disabled = True
-            skip_phase.disabled = True
+            skip_phase.visible = False  # Hide skip button when stopped
             await send_text(manager, "Pomodoro Stopped")
             page.update()
 
-    async def skip_phase(e):
+    async def skip_phase_handler(e):
+        log_message("Skip button clicked!")  # Debug log
         nonlocal pomodoro_task
         if pomodoro_task:
             pomodoro_task.cancel()
@@ -692,12 +742,7 @@ async def main(page_: ft.Page):
             or (right_glass and right_glass.client.is_connected)
         )
 
-        if connected != previous_connected:
-            if connected:
-                log_message("Glasses reconnected.")
-            else:
-                log_message("Glasses disconnected.")
-
+        # Update button states
         connect_button.visible = not connected
         disconnect_button.visible = connected
         send_button.disabled = not connected
@@ -725,14 +770,13 @@ async def main(page_: ft.Page):
     start_rsvp_button.on_click = start_rsvp
     start_timer_button.on_click = start_timer
     stop_timer_button.on_click = stop_timer
-    start_pomodoro.on_click = start_pomodoro
-    stop_pomodoro.on_click = stop_pomodoro
-    skip_phase.on_click = skip_phase
+    start_pomodoro.on_click = start_pomodoro_handler
+    stop_pomodoro.on_click = stop_pomodoro_handler
+    skip_phase.on_click = skip_phase_handler
 
     # Create main layout
     main_content = ft.Column(
         [
-            connection_buttons,
             ft.Divider(),
             message_section,
             ft.Divider(),
