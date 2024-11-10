@@ -3,7 +3,8 @@ import logging
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 from typing import Optional, Callable
-from even_glasses.models import DesiredConnectionState
+from even_glasses.models import DesiredConnectionState, Command
+import time
 
 from even_glasses.utils import construct_heartbeat
 from even_glasses.service_identifiers import (
@@ -142,7 +143,7 @@ class Glass(BleDevice):
         self.heartbeat_freq = heartbeat_freq
         self.heartbeat_task: Optional[asyncio.Task] = None
         self.notification_handler: Optional[Callable[[int, bytes], None]] = None
-        
+        self.last_heartbeat = None
 
     async def start_heartbeat(self):
         if self.heartbeat_task is None or self.heartbeat_task.done():
@@ -172,9 +173,22 @@ class Glass(BleDevice):
         await super().disconnect()
     
     async def handle_notification(self, sender: int, data: bytes):
-        logger.info(f"Notification from {self.name}: {data.hex()}")
+        logger.debug(f"Raw notification from {self.name}: {data.hex()}")
+        
+        try:
+            # Check for heartbeat (Command.HEARTBEAT = 0x25)
+            if len(data) >= 6 and data[0] == Command.HEARTBEAT:
+                length = data[1] | (data[2] << 8)  # Next two bytes are length
+                if length == 6:  # Verify expected length
+                    self.last_heartbeat = time.time()
+                    logger.info(f"Valid heartbeat received from {self.name}")
+                else:
+                    logger.debug(f"Message with heartbeat command but wrong length: {data.hex()}")
+        except Exception as e:
+            logger.error(f"Error processing notification: {e}")
+        
         if self.notification_handler:
-            await self.notification_handler(self,sender, data)
+            await self.notification_handler(self, sender, data)
 
 
 class GlassesManager:
