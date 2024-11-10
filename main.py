@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Initialize GlassesManager
 manager = GlassesManager(left_address=None, right_address=None)
 
+DEBUG = True  # Toggle for debug features
 
 async def main(page: ft.Page):
     page.title = "Glasses Control Panel"
@@ -74,8 +75,11 @@ async def main(page: ft.Page):
         ), message_input, send_button
 
     def create_command_section():
+        if not DEBUG:
+            return None, None, None, None
+        
         command_header = ft.Text(
-            value="Send Command", size=18, weight=ft.FontWeight.BOLD
+            value="Send Command (Debug)", size=18, weight=ft.FontWeight.BOLD
         )
         side_input = ft.TextField(
             label="Side (e.g., l, r, or leave empty for both)",
@@ -469,7 +473,8 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     send_button.on_click = send_message
     send_notification_button.on_click = send_custom_notification
     start_rsvp_button.on_click = start_rsvp
-    send_command_button.on_click = send_command_to_device
+    if DEBUG:
+        send_command_button.on_click = send_command_to_device
 
     # Main Layout
     main_content = ft.Column(
@@ -477,8 +482,9 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             status_section,
             connection_buttons,
             ft.Divider(),
-            command_section,  # Add this line
-            ft.Divider(),
+        ] + 
+        ([command_section, ft.Divider()] if DEBUG and command_section else []) +
+        [
             message_section,
             ft.Divider(),
             notification_section,
