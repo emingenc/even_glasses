@@ -1,11 +1,11 @@
 import asyncio
 import json
 import flet as ft
+from flet import alignment
 from even_glasses.bluetooth_manager import GlassesManager
 from even_glasses.commands import send_text, send_rsvp, send_notification
 from even_glasses.models import NCSNotification, RSVPConfig
 from even_glasses.notification_handlers import handle_incoming_notification
-
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -14,9 +14,12 @@ logger = logging.getLogger(__name__)
 # Initialize GlassesManager
 manager = GlassesManager(left_address=None, right_address=None)
 
+DEBUG = False  # Toggle for debug features
+
 async def main(page: ft.Page):
     page.title = "Glasses Control Panel"
-    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
+    page.vertical_alignment = ft.MainAxisAlignment.START
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
@@ -27,8 +30,7 @@ async def main(page: ft.Page):
         value="",
         read_only=True,
         multiline=True,
-        width=750,
-        height=200,
+        expand=True,
     )
 
     def log_message(message):
@@ -40,36 +42,86 @@ async def main(page: ft.Page):
         status_header = ft.Text(
             value="Glasses Status", size=20, weight=ft.FontWeight.BOLD
         )
-        left_status = ft.Text(value="Left Glass: Disconnected", size=14)
-        right_status = ft.Text(value="Right Glass: Disconnected", size=14)
-        return ft.Column([status_header, left_status, right_status], spacing=5), left_status, right_status
+
+        # Status indicators
+        left_status_icon = ft.Icon(
+            name=ft.icons.RADIO_BUTTON_UNCHECKED,
+            color=ft.colors.RED,
+            size=16,
+        )
+        right_status_icon = ft.Icon(
+            name=ft.icons.RADIO_BUTTON_UNCHECKED,
+            color=ft.colors.RED,
+            size=16,
+        )
+
+        # Status texts
+        left_status_text = ft.Text(value="Left Glass: Disconnected", size=14)
+        right_status_text = ft.Text(value="Right Glass: Disconnected", size=14)
+
+        # Combine icons and texts
+        left_status_row = ft.Row(
+            [left_status_icon, left_status_text],
+            spacing=5,
+            alignment=ft.MainAxisAlignment.START,
+        )
+        right_status_row = ft.Row(
+            [right_status_icon, right_status_text],
+            spacing=5,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        # Combine both statuses
+        status_row = ft.Row(
+            [left_status_row, right_status_row],
+            spacing=20,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        status_section = ft.Column(
+            [
+                status_header,
+                status_row,
+            ],
+            spacing=10,
+            expand=True,
+        )
+
+        return status_section, left_status_icon, right_status_icon, left_status_text, right_status_text
 
     # Connection Buttons
     def create_connection_buttons():
-        connect_button = ft.ElevatedButton(text="Connect to Glasses")
-        disconnect_button = ft.ElevatedButton(
-            text="Disconnect Glasses", visible=False
+        connect_button = ft.ElevatedButton(
+            text="Connect to Glasses",
+            tooltip="Search and connect to nearby glasses"
         )
+        disconnect_button = ft.ElevatedButton(text="Disconnect Glasses", visible=False)
         return ft.Row(
             [connect_button, disconnect_button],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=20,
+            expand=True,
         ), connect_button, disconnect_button
 
     # Message Input Section
     def create_message_section():
-        message_input = ft.TextField(label="Message to send", width=400)
+        message_input = ft.TextField(label="Message to Send", expand=True)
         send_button = ft.ElevatedButton(text="Send Message", disabled=True)
         return ft.Column(
             [
-                message_input,
+                ft.Text(
+                    value="Send Text Message",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                ),
                 ft.Row(
-                    [send_button],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=20,
+                    [message_input, send_button],
+                    spacing=10,
+                    expand=True,
                 ),
             ],
             spacing=10,
+            expand=True,
         ), message_input, send_button
 
     # Notification Input Section
@@ -77,7 +129,12 @@ async def main(page: ft.Page):
         notification_header = ft.Text(
             value="Send Custom Notification", size=18, weight=ft.FontWeight.BOLD
         )
-        msg_id_input = ft.TextField(label="Message ID", width=200, value="1", keyboard_type=ft.KeyboardType.NUMBER)
+        msg_id_input = ft.TextField(
+            label="Message ID",
+            width=200,
+            value="1",
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
         app_identifier_field = ft.TextField(
             label="App Identifier", width=400, value="org.telegram.messenger"
         )
@@ -98,28 +155,44 @@ async def main(page: ft.Page):
 
         inputs = ft.Column(
             [
-                msg_id_input,
-                app_identifier_field,
-                title_input,
-                subtitle_input,
+                ft.Row(
+                    [msg_id_input, app_identifier_field],
+                    spacing=10,
+                    expand=True,
+                ),
+                ft.Row(
+                    [title_input, subtitle_input],
+                    spacing=10,
+                    expand=True,
+                ),
                 notification_message_input,
                 display_name_input,
             ],
             spacing=10,
+            expand=True,
         )
 
-        return ft.Column(
-            [
-                notification_header,
-                inputs,
-                ft.Row(
-                    [send_notification_button],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=20,
-                ),
-            ],
-            spacing=10,
-        ), msg_id_input, app_identifier_field, title_input, subtitle_input, notification_message_input, display_name_input, send_notification_button
+        return (
+            ft.Column(
+                [
+                    notification_header,
+                    inputs,
+                    ft.Row(
+                        [send_notification_button],
+                        alignment=ft.MainAxisAlignment.END,
+                    ),
+                ],
+                spacing=10,
+                expand=True,
+            ),
+            msg_id_input,
+            app_identifier_field,
+            title_input,
+            subtitle_input,
+            notification_message_input,
+            display_name_input,
+            send_notification_button,
+        )
 
     # RSVP Configuration Section
     def create_rsvp_section():
@@ -155,26 +228,26 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             value="RSVP Settings", size=18, weight=ft.FontWeight.BOLD
         )
         words_per_group = ft.TextField(
-            label="Words per group",
+            label="Words per Group",
             width=200,
             value="4",
             keyboard_type=ft.KeyboardType.NUMBER,
         )
         wpm_input = ft.TextField(
-            label="Words per minute",
+            label="Words per Minute",
             width=200,
             value="750",
             keyboard_type=ft.KeyboardType.NUMBER,
         )
         padding_char = ft.TextField(
-            label="Padding character",
+            label="Padding Character",
             width=200,
             value="---",
         )
         rsvp_text = ft.TextField(
             label="Text for RSVP",
-            width=750,
             multiline=True,
+            expand=True,
             min_lines=3,
             max_lines=10,
             value=DEMO_RSVP_TEXT,
@@ -184,27 +257,76 @@ End of demo text. Thank you for trying out the RSVP feature!"""
 
         config_inputs = ft.Row(
             [words_per_group, wpm_input, padding_char],
-            alignment=ft.MainAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.START,
             spacing=20,
+        )
+
+        return (
+            ft.Column(
+                [
+                    rsvp_header,
+                    config_inputs,
+                    rsvp_text,
+                    ft.Row(
+                        [start_rsvp_button, rsvp_status],
+                        alignment=ft.MainAxisAlignment.START,
+                        spacing=20,
+                    ),
+                ],
+                spacing=10,
+            ),
+            words_per_group,
+            wpm_input,
+            padding_char,
+            rsvp_text,
+            start_rsvp_button,
+            rsvp_status,
+        )
+
+    # Command Section (Debug)
+    def create_command_section():
+        command_header = ft.Text(
+            value="Send Command (Debug)", size=18, weight=ft.FontWeight.BOLD
+        )
+        side_input = ft.TextField(
+            label="Side (l, r, or leave empty for both)",
+            width=200,
+        )
+        data_input = ft.TextField(
+            label="Data (space-separated hex values)",
+            width=400,
+        )
+        send_command_button = ft.ElevatedButton(
+            text="Send Command", disabled=True
+        )
+
+        inputs = ft.Row(
+            [side_input, data_input],
+            spacing=10,
         )
 
         return ft.Column(
             [
-                rsvp_header,
-                config_inputs,
-                rsvp_text,
+                command_header,
+                inputs,
                 ft.Row(
-                    [start_rsvp_button, rsvp_status],
-                    alignment=ft.MainAxisAlignment.CENTER,
+                    [send_command_button],
+                    alignment=ft.MainAxisAlignment.START,
                     spacing=20,
                 ),
             ],
             spacing=10,
-        ), words_per_group, wpm_input, padding_char, rsvp_text, start_rsvp_button, rsvp_status
+        ), side_input, data_input, send_command_button
 
     # Create Components
-    status_section, left_status, right_status = create_status_section()
+    status_section, left_status_icon, right_status_icon, left_status_text, right_status_text = create_status_section()
     connection_buttons, connect_button, disconnect_button = create_connection_buttons()
+    connection_buttons = ft.Row(
+        [connect_button, disconnect_button],
+        alignment=ft.MainAxisAlignment.CENTER,
+        spacing=20,
+        expand=True,
+    )
     message_section, message_input, send_button = create_message_section()
     (
         notification_section,
@@ -226,6 +348,9 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         rsvp_status,
     ) = create_rsvp_section()
 
+    if DEBUG:
+        command_section, side_input, data_input, send_command_button = create_command_section()
+
     # Update Status Function
     def on_status_changed():
         nonlocal connected
@@ -234,24 +359,34 @@ End of demo text. Thank you for trying out the RSVP feature!"""
 
         previous_connected = connected
 
+        # Update left glass status
         if left_glass and left_glass.client.is_connected:
-            left_status.value = f"Left Glass ({left_glass.name[:13]}): Connected"
+            left_status_icon.name = ft.icons.RADIO_BUTTON_CHECKED
+            left_status_icon.color = ft.colors.GREEN
+            left_status_text.value = f"Left Glass ({left_glass.name[:13]}): Connected"
         else:
-            left_status.value = "Left Glass: Disconnected"
+            left_status_icon.name = ft.icons.RADIO_BUTTON_UNCHECKED
+            left_status_icon.color = ft.colors.RED
+            left_status_text.value = "Left Glass: Disconnected"
 
+        # Update right glass status
         if right_glass and right_glass.client.is_connected:
-            right_status.value = f"Right Glass ({right_glass.name[:13]}): Connected"
+            right_status_icon.name = ft.icons.RADIO_BUTTON_CHECKED
+            right_status_icon.color = ft.colors.GREEN
+            right_status_text.value = f"Right Glass ({right_glass.name[:13]}): Connected"
         else:
-            right_status.value = "Right Glass: Disconnected"
+            right_status_icon.name = ft.icons.RADIO_BUTTON_UNCHECKED
+            right_status_icon.color = ft.colors.RED
+            right_status_text.value = "Right Glass: Disconnected"
 
-        connected = (
-            (left_glass and left_glass.client.is_connected)
-            or (right_glass and right_glass.client.is_connected)
+        # Determine overall connection status
+        connected = (left_glass and left_glass.client.is_connected) or (
+            right_glass and right_glass.client.is_connected
         )
 
         if connected != previous_connected:
             if connected:
-                log_message("Glasses reconnected.")
+                log_message("Glasses connected.")
             else:
                 log_message("Glasses disconnected.")
 
@@ -260,10 +395,14 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         send_button.disabled = not connected
         send_notification_button.disabled = not connected
         start_rsvp_button.disabled = not connected
+        if DEBUG:
+            send_command_button.disabled = not connected
         page.update()
 
     # Async Event Handlers
     async def connect_glasses(e):
+        progress = ft.ProgressRing()
+        connect_button.content = ft.Row([progress, ft.Text("Connecting...")])
         connect_button.disabled = True
         page.update()
         connected = await manager.scan_and_connect()
@@ -282,17 +421,18 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     async def disconnect_glasses(e):
         disconnect_button.disabled = True
         page.update()
-        await manager.disconnect_all()  # Updated method name
-        left_status.value = "Left Glass: Disconnected"
-        right_status.value = "Right Glass: Disconnected"
+        await manager.disconnect_all()
         log_message("Disconnected all glasses.")
         on_status_changed()
         disconnect_button.disabled = False
         page.update()
 
     async def send_message(e):
-        msg = message_input.value
-        if msg:
+        try:
+            msg = message_input.value
+            if not msg:
+                page.show_snack_bar(ft.SnackBar(content=ft.Text("Please enter a message")))
+                return
             success = await send_text(manager, msg)
             if success:
                 log_message(f"Sent message to glasses: {msg}")
@@ -300,6 +440,8 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 log_message(f"Failed to send message to glasses: {msg}")
             message_input.value = ""
             page.update()
+        except Exception as ex:
+            page.show_snack_bar(ft.SnackBar(content=ft.Text(f"Error: {str(ex)}")))
 
     async def send_custom_notification(e):
         try:
@@ -358,7 +500,6 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 rsvp_status.value = "RSVP Status: Failed"
                 log_message("RSVP failed.")
 
-            start_rsvp_button.disabled = False
             page.update()
 
         except ValueError as e:
@@ -369,33 +510,168 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             start_rsvp_button.disabled = False
             page.update()
 
+    async def send_command_to_device(e):
+        device = side_input.value.strip()
+        data_str = data_input.value.strip()
+
+        # Process data input
+        data_bytes = bytearray()
+        if data_str:
+            data_items = data_str.split()
+            for item in data_items:
+                try:
+                    data_int = int(item, 16)
+                    data_bytes.append(data_int)
+                except ValueError:
+                    log_message(f"Invalid data value '{item}'. Please enter hex values.")
+                    return
+
+        # Determine targets
+        if device == '':
+            # Send to both devices
+            if manager.left_glass:
+                await manager.left_glass.send(data_bytes)
+            if manager.right_glass:
+                await manager.right_glass.send(data_bytes)
+        elif device == 'l':
+            if manager.left_glass:
+                await manager.left_glass.send(data_bytes)
+        elif device == 'r':
+            if manager.right_glass:
+                await manager.right_glass.send(data_bytes)
+        else:
+            log_message("Invalid device identifier. Use 'l' for left, 'r' for right, or leave empty for both.")
+            return
+
+        log_message(f"Sent command to device '{device}': {data_bytes.hex()}")
+        page.update()
+
+    def on_keyboard(e: ft.KeyboardEvent):
+        if e.key == "Enter" and e.ctrl:
+            send_message(None)
+    page.on_keyboard_event = on_keyboard
+
     # Assign Event Handlers
     connect_button.on_click = connect_glasses
     disconnect_button.on_click = disconnect_glasses
     send_button.on_click = send_message
     send_notification_button.on_click = send_custom_notification
     start_rsvp_button.on_click = start_rsvp
+    if DEBUG:
+        send_command_button.on_click = send_command_to_device
+
+    # Organize UI into Tabs
+    tabs = ft.Tabs(
+        selected_index=0,
+        tabs=[
+            ft.Tab(
+                text="Messages",
+                content=message_section,
+                icon=ft.icons.MESSAGE,
+            ),
+            ft.Tab(
+                text="Notifications",
+                content=notification_section,
+                icon=ft.icons.NOTIFICATIONS,
+            ),
+            ft.Tab(
+                text="RSVP",
+                content=rsvp_section,
+                icon=ft.icons.VIEW_AGENDA,
+            ),
+            ft.Tab(
+                text="Logs",
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            value="Event Log:",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        log_output,
+                    ]
+                ),
+                icon=ft.icons.LIST,
+            ),
+        ],
+        expand=True,
+        adaptive=True,
+    )
+
+    if DEBUG:
+        tabs.tabs.insert(
+            3,
+            ft.Tab(
+                text="Debug",
+                content=command_section,
+                icon=ft.icons.BUG_REPORT,
+            )
+        )
 
     # Main Layout
     main_content = ft.Column(
         [
-            status_section,
-            connection_buttons,
-            ft.Divider(),
-            message_section,
-            ft.Divider(),
-            notification_section,
-            ft.Divider(),
-            rsvp_section,
-            ft.Divider(),
-            ft.Text(value="Event Log:", size=16, weight=ft.FontWeight.BOLD),
-            log_output,
+            # Top status bar
+            ft.Container(
+                content=ft.Card(
+                    content=ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.ResponsiveRow(
+                                    [
+                                        ft.Container(
+                                            content=status_section,
+                                            padding=10,
+                                            col={"xs": 12, "sm": 12, "md": 12, "lg": 12, "xl": 12},
+                                        ),
+                                    ],
+                                ),
+                                ft.ResponsiveRow(
+                                    [
+                                        ft.Container(
+                                            content=connection_buttons,
+                                            padding=10,
+                                            col={"xs": 12, "sm": 12, "md": 12, "lg": 12, "xl": 12},
+                                        ),
+                                    ],
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        padding=10,
+                    ),
+                ),
+            ),
+            
+            # Main content area with tabs
+            ft.Container(
+                content=ft.Column(
+                    [
+                        tabs,
+                    ],
+                    expand=True,
+                    
+                ),
+                padding=10,
+                expand=True,
+            ),
         ],
         spacing=20,
         expand=True,
     )
 
-    page.add(main_content)
+    # Update page settings
+    page.padding = ft.padding.all(20)
+    page.bgcolor = ft.colors.BACKGROUND
+
+    # Wrap main content in a centered container
+    page.add(
+        ft.Container(
+            content=main_content,
+            expand=True,
+            margin=ft.margin.only(left=20, right=20),
+        )
+    )
 
     # Background task to monitor status
     async def status_monitor():

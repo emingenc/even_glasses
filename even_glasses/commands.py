@@ -87,6 +87,18 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
     lines = format_text_lines(text_message)
     total_pages = (len(lines) + 4) // 5  # 5 lines per page
 
+    if total_pages > 1:
+        logging.info(f"Sending {total_pages} pages with {duration} seconds delay")
+        screen_status = AIStatus.DISPLAYING | ScreenAction.NEW_CONTENT
+        await send_text_packet(
+            manager=manager,
+            text_message=lines[0],
+            page_number=1,
+            max_pages=total_pages,
+            screen_status=screen_status,
+        )
+        await asyncio.sleep(0.1)
+        
     for pn, page in enumerate(range(0, len(lines), 5), start=1):
         page_lines = lines[page : page + 5]
 
@@ -98,7 +110,7 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
             )
 
         text = "\n".join(page_lines)
-        screen_status = ScreenAction.NEW_CONTENT | AIStatus.DISPLAYING
+        screen_status =  AIStatus.DISPLAYING
 
         await send_text_packet(
             manager=manager,
@@ -107,18 +119,22 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
             max_pages=total_pages,
             screen_status=screen_status,
         )
-        if pn != 1 and total_pages != 1:
-            await asyncio.sleep(duration)
-        if pn == total_pages:
-            screen_status = ScreenAction.NEW_CONTENT | AIStatus.DISPLAY_COMPLETE
 
-            await send_text_packet(
-                manager=manager,
-                text_message=text,
-                page_number=pn,
-                max_pages=total_pages,
-                screen_status=screen_status,
-            )
+        # Wait after sending each page except the last one
+        if pn != total_pages:
+            await asyncio.sleep(duration)
+            
+
+    # After all pages, send the last page again with DISPLAY_COMPLETE status
+    screen_status = AIStatus.DISPLAY_COMPLETE
+    await send_text_packet(
+        manager=manager,
+        text_message=text,
+        page_number=total_pages,
+        max_pages=total_pages,
+        screen_status=screen_status,
+    )
+
     return text_message
 
 

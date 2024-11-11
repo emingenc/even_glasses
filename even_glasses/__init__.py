@@ -10,7 +10,7 @@ from even_glasses.models import (
     Command,  
 )
 
-__version__ = "0.1.07"
+__version__ = "0.1.08"
 
 __all__ = [
     "Glass",
