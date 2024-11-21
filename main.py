@@ -1,4 +1,3 @@
-
 import asyncio
 import flet as ft
 from flet import alignment
@@ -10,7 +9,6 @@ import logging
 from even_glasses.models import (
     SilentModeStatus,
     BrightnessAuto,
-    DashboardState,
 )
 from even_glasses.commands import (
     send_text,
@@ -18,11 +16,11 @@ from even_glasses.commands import (
     send_notification,
     apply_silent_mode,
     apply_brightness,
-    apply_dashboard_position,
     apply_headup_angle,
-    apply_dashboard_show,
     add_or_update_note,
     delete_note,
+    show_dashboard,
+    hide_dashboard,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Initialize GlassesManager
 manager = GlassesManager(left_address=None, right_address=None)
 
-DEBUG = False  # Toggle for debug features
+DEBUG = True  # Toggle for debug features
 
 async def main(page: ft.Page):
     page.title = "Glasses Control Panel"
@@ -365,7 +363,12 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             ],
             value="0",
         )
-        dashboard_position_button = ft.ElevatedButton(text="Set Dashboard Position")
+        show_dashboard_button = ft.ElevatedButton(
+            text="Show Dashboard",
+        )
+        hide_dashboard_button = ft.ElevatedButton(
+            text="Hide Dashboard",
+        )
 
         # Head-up Angle Control
         headup_angle_slider = ft.Slider(
@@ -378,10 +381,6 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         )
         headup_angle_button = ft.ElevatedButton(text="Apply Head-up Angle")
 
-        # Dashboard Show/Hide
-        dashboard_show_switch = ft.Switch(label="Show Dashboard")
-        dashboard_show_button = ft.ElevatedButton(text="Apply Dashboard State")
-
         # Note Management
         note_number_dropdown = ft.Dropdown(
             label="Note Number",
@@ -390,6 +389,12 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             ],
             value="1",
         )
+        note_title_input = ft.TextField(
+            label="Note Title",
+            multiline=False,
+            expand=True,
+        )
+            
         note_text_input = ft.TextField(
             label="Note Text",
             multiline=False,
@@ -413,20 +418,20 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 brightness_auto_switch,
                 brightness_button,
                 ft.Divider(),
-                ft.Text("Dashboard Position", size=16, weight=ft.FontWeight.BOLD),
+                ft.Text("Dashboard Control", size=16, weight=ft.FontWeight.BOLD),
                 dashboard_position_dropdown,
-                dashboard_position_button,
+                ft.Row(
+                    [show_dashboard_button, hide_dashboard_button],
+                    alignment=ft.MainAxisAlignment.START,
+                    spacing=10,
+                ),
                 ft.Divider(),
                 ft.Text("Head-up Display Angle", size=16, weight=ft.FontWeight.BOLD),
                 headup_angle_slider,
                 headup_angle_button,
                 ft.Divider(),
-                ft.Text("Dashboard Show/Hide", size=16, weight=ft.FontWeight.BOLD),
-                dashboard_show_switch,
-                dashboard_show_button,
-                ft.Divider(),
                 ft.Text("Note Management", size=16, weight=ft.FontWeight.BOLD),
-                ft.Row([note_number_dropdown, note_text_input], spacing=10),
+                ft.Row([note_number_dropdown, note_title_input, note_text_input], spacing=10),
                 ft.Row([note_add_button, note_delete_button], spacing=10),
             ],
             spacing=10,
@@ -441,12 +446,12 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             brightness_auto_switch,
             brightness_button,
             dashboard_position_dropdown,
-            dashboard_position_button,
+            show_dashboard_button,
+            hide_dashboard_button,
             headup_angle_slider,
             headup_angle_button,
-            dashboard_show_switch,
-            dashboard_show_button,
             note_number_dropdown,
+            note_title_input,
             note_text_input,
             note_add_button,
             note_delete_button,
@@ -493,12 +498,12 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         brightness_auto_switch,
         brightness_button,
         dashboard_position_dropdown,
-        dashboard_position_button,
+        show_dashboard_button,
+        hide_dashboard_button,
         headup_angle_slider,
         headup_angle_button,
-        dashboard_show_switch,
-        dashboard_show_button,
         note_number_dropdown,
+        note_title_input,
         note_text_input,
         note_add_button,
         note_delete_button,
@@ -552,9 +557,9 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             send_command_button.disabled = not connected
         silent_mode_button.disabled = not connected
         brightness_button.disabled = not connected
-        dashboard_position_button.disabled = not connected
+        show_dashboard_button.disabled = not connected
+        hide_dashboard_button.disabled = not connected
         headup_angle_button.disabled = not connected
-        dashboard_show_button.disabled = not connected
         note_add_button.disabled = not connected
         note_delete_button.disabled = not connected
         page.update()
@@ -684,28 +689,32 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         await apply_brightness(manager, level, auto)
         log_message(f"Brightness set to {level} with Auto {auto.name}.")
 
-    async def apply_dashboard_position_handler(e):
+    async def show_dashboard_handler(e):
+        try:
+            position = int(dashboard_position_dropdown.value)
+            await show_dashboard(manager, position)
+            log_message(f"Dashboard shown at position {position}.")
+        except ValueError:
+            log_message("Invalid dashboard position selected.")
+
+    async def hide_dashboard_handler(e):
         position = int(dashboard_position_dropdown.value)
-        await apply_dashboard_position(manager, position)
-        log_message(f"Dashboard position set to {position}.")
+        await hide_dashboard(manager, position)
+        log_message("Dashboard hidden.")
 
     async def apply_headup_angle_handler(e):
         angle = int(headup_angle_slider.value)
         await apply_headup_angle(manager, angle)
         log_message(f"Head-up display angle set to {angle} degrees.")
 
-    async def apply_dashboard_show_handler(e):
-        state = DashboardState.ON if dashboard_show_switch.value else DashboardState.OFF
-        await apply_dashboard_show(manager, state)
-        log_message(f"Dashboard {'shown' if state == DashboardState.ON else 'hidden'}.")
-
     async def add_or_update_note_handler(e):
         note_number = int(note_number_dropdown.value)
+        note_title_value = note_title_input.value.strip()
         note_text_value = note_text_input.value.strip()
-        if not note_text_value:
+        if not note_text_value or not note_title_value:
             log_message("Please enter note text.")
             return
-        await add_or_update_note(manager, note_number, note_text_value)
+        await add_or_update_note(manager, note_number, note_title_value, note_text_value)
         log_message(f"Note {note_number} added/updated.")
 
     async def delete_note_handler(e):
@@ -729,11 +738,11 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         send_command_button.on_click = send_command_to_device
     silent_mode_button.on_click = apply_silent_mode_handler
     brightness_button.on_click = apply_brightness_handler
-    dashboard_position_button.on_click = apply_dashboard_position_handler
     headup_angle_button.on_click = apply_headup_angle_handler
-    dashboard_show_button.on_click = apply_dashboard_show_handler
     note_add_button.on_click = add_or_update_note_handler
     note_delete_button.on_click = delete_note_handler
+    hide_dashboard_button.on_click = hide_dashboard_handler
+    show_dashboard_button.on_click = show_dashboard_handler
 
     # Organize UI into Tabs
     tabs = ft.Tabs(

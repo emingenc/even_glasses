@@ -79,7 +79,7 @@ async def send_text_packet(
         # Send to the right glass and wait for acknowledgment
         await manager.right_glass.send(ai_result_command)
         await asyncio.sleep(delay)
-        
+
         return text_message
     else:
         logging.error("Could not connect to glasses devices.")
@@ -102,7 +102,7 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
             screen_status=screen_status,
         )
         await asyncio.sleep(0.1)
-        
+
     for pn, page in enumerate(range(0, len(lines), 5), start=1):
         page_lines = lines[page : page + 5]
 
@@ -114,7 +114,7 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
             )
 
         text = "\n".join(page_lines)
-        screen_status =  AIStatus.DISPLAYING
+        screen_status = AIStatus.DISPLAYING
 
         await send_text_packet(
             manager=manager,
@@ -127,7 +127,6 @@ async def send_text(manager, text_message: str, duration: float = 5) -> str:
         # Wait after sending each page except the last one
         if pn != total_pages:
             await asyncio.sleep(duration)
-            
 
     # After all pages, send the last page again with DISPLAY_COMPLETE status
     screen_status = AIStatus.DISPLAY_COMPLETE
@@ -160,11 +159,10 @@ async def send_rsvp(manager, text: str, config: RSVPConfig):
         return False
 
     try:
-        
         # default delay is 01 second we are adding below to that so we need to calculate the delay
         screen_delay = 60 / config.wpm
         logging.info(f"Words screen change delay: {screen_delay}")
-        delay = min(screen_delay - 0.1 , 0.1) # Delay between words set min to 0.1
+        delay = min(screen_delay - 0.1, 0.1)  # Delay between words set min to 0.1
         words = text.split()
         if not words:
             logging.warning("No words to display after splitting")
@@ -198,22 +196,22 @@ async def send_rsvp(manager, text: str, config: RSVPConfig):
         logging.error(f"Error in RSVP display: {e}")
         await send_text(manager, "--")  # Try to clear display
         return False
-    
 
 
 async def send_notification(manager, notification: NCSNotification):
     """Send a notification to the glasses."""
     notification_chunks = await construct_notification(notification)
     for chunk in notification_chunks:
-            await manager.left_glass.send(chunk)
-            await manager.right_glass.send(chunk)
-            print(f"Sent chunk to glasses: {chunk}")
-            await asyncio.sleep(0.01)  # Small delay between chunks
+        await manager.left_glass.send(chunk)
+        await manager.right_glass.send(chunk)
+        print(f"Sent chunk to glasses: {chunk}")
+        await asyncio.sleep(0.01)  # Small delay between chunks
 
 
 def construct_silent_mode(status: SilentModeStatus) -> bytes:
     """Construct command to set silent mode."""
     return bytes([Command.SILENT_MODE, status, 0x00])
+
 
 def construct_brightness(level: int, auto: BrightnessAuto) -> bytes:
     """Construct command to set brightness with auto setting."""
@@ -221,14 +219,28 @@ def construct_brightness(level: int, auto: BrightnessAuto) -> bytes:
         raise ValueError("Brightness level must be between 0x00 and 0x29")
     return bytes([Command.BRIGHTNESS, level, auto])
 
-def construct_dashboard_position(position: int) -> bytes:
-    """Construct command to set dashboard position."""
-    if not 0x00 <= position <= 0x08:
-        raise ValueError("Position must be between 0x00 and 0x08")
-    # Corrected command according to BLE Cheatsheet
-    return bytes([
-        Command.DASHBOARD_POSITION, 0x07, 0x00, 0x01, 0x02, 0x01, position
-    ])
+
+def construct_dashboard_show_state(state: DashboardState, position: int) -> bytes:
+    """Construct command to show or hide the dashboard with position."""
+    state_value = 0x01 if state == DashboardState.ON else 0x00
+    return bytes(
+        [Command.DASHBOARD_POSITION, 0x07, 0x00, 0x01, 0x02, state_value, position]
+    )
+
+
+async def show_dashboard(manager, position: int):
+    """Show the dashboard at the specified position."""
+    command = construct_dashboard_show_state(DashboardState.ON, position)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Dashboard shown at position {position}.")
+
+
+async def hide_dashboard(manager, position: int):
+    """Hide the dashboard."""
+    command = construct_dashboard_show_state(DashboardState.OFF, position)
+    await send_command_to_glasses(manager, command)
+    logging.info("Dashboard hidden.")
+
 
 def construct_headup_angle(angle: int) -> bytes:
     """Construct command to set head-up display angle."""
@@ -237,54 +249,68 @@ def construct_headup_angle(angle: int) -> bytes:
     angle_byte = angle & 0xFF
     return bytes([Command.HEADUP_ANGLE, angle_byte, 0x01])
 
-def construct_dashboard_show(state: DashboardState) -> bytes:
-    """Construct command to show or hide the dashboard."""
-    # Ensure state is 0x01 for ON and 0x00 for OFF
-    state_value = 0x01 if state == DashboardState.ON else 0x00
-    return bytes([
-        Command.DASHBOARD_SHOW, 0x00, 0x04, 0x02, state_value
-    ])
 
 def construct_note_delete(note_number: int) -> bytes:
     """Construct command to delete a note with the given number."""
     if not 1 <= note_number <= 4:
         raise ValueError("Note number must be between 1 and 4")
-    return bytes([
-        0x1E, 0x10, 0x00, 0xE0, 0x03, 0x01, 0x00, 0x01,
-        0x00, note_number, 0x00, 0x01, 0x00, 0x01,
-        0x00, 0x00
-    ])
+    return bytes(
+        [
+            0x1E,
+            0x10,
+            0x00,
+            0xE0,
+            0x03,
+            0x01,
+            0x00,
+            0x01,
+            0x00,
+            note_number,
+            0x00,
+            0x01,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+        ]
+    )
 
-def construct_note_add(note_number: int, note_text: str) -> bytes:
-    """Construct command to add or change a note."""
+
+def construct_note_add(note_number: int, name: str, text: str) -> bytes:
+    """Construct command to add or change a note with a name and text."""
     if not 1 <= note_number <= 4:
         raise ValueError("Note number must be between 1 and 4")
-    # Encode note text to UTF-8 and add null terminator
-    text_bytes = note_text.encode('utf-8') + b'\x00\x00'
-    text_length = len(text_bytes)
-    # Update length bytes in the command
-    length = 0x12 + text_length  # Base length is 0x12, adjust with text length
-    length_bytes = length.to_bytes(2, byteorder='little')
+
+    # Encode name and text to UTF-8 bytes
+    name_bytes = name.encode('utf-8')  # Name of the note
+    text_bytes = text.encode('utf-8')  # Text of the note
+
+    # Construct the command bytes according to the specification
     cmd = bytes([
-        0x1E,                   # Command code
-        length_bytes[0],        # Length LSB
-        length_bytes[1],        # Length MSB
-        0x70, 0x03, 0x01, 0x00, 0x01,
-        0x00, note_number,      # Note number
-        0x01, 0x04
-    ]) + text_bytes
+        0x1E,  # Command code
+        0x16,  # Subcommand code
+        0x00, 0x70,  # Fixed bytes
+        0x03, 0x01,  # Fixed bytes
+        0x00, 0x01,  # Fixed bytes
+        0x00, note_number,  # Note number (1-4)
+        0x01, 0x04,  # Fixed bytes
+    ]) + name_bytes + bytes([0x04, 0x00]) + text_bytes + bytes([0x00, 0x00])
+
     return cmd
+
 
 def construct_clear_screen() -> bytes:
     """Construct command to clear the screen."""
-    return bytes([
-        Command.START_AI, 
-        SubCommand.STOP,
-        0x00,
-        0x00,
-        0x00,
-    ])
-    
+    return bytes(
+        [
+            Command.START_AI,
+            SubCommand.STOP,
+            0x00,
+            0x00,
+            0x00,
+        ]
+    )
+
 
 async def apply_silent_mode(manager, status: SilentModeStatus):
     """Apply silent mode setting."""
@@ -292,17 +318,22 @@ async def apply_silent_mode(manager, status: SilentModeStatus):
     await send_command_to_glasses(manager, command)
     logging.info(f"Silent Mode set to {status.name}.")
 
+
 async def apply_brightness(manager, level: int, auto: BrightnessAuto):
     """Apply brightness setting."""
     command = construct_brightness(level, auto)
     await send_command_to_glasses(manager, command)
     logging.info(f"Brightness set to {level} with Auto {auto.name}.")
 
-async def apply_dashboard_position(manager, position: int):
+
+async def apply_dashboard_position(manager, position: int, state: DashboardState):
     """Set dashboard position."""
-    command = construct_dashboard_position(position)
-    await send_command_to_glasses(manager, command)
+    if state == DashboardState.ON:
+        await show_dashboard(manager, position)
+    else:
+        await hide_dashboard(manager, position)
     logging.info(f"Dashboard position set to {position}.")
+
 
 async def apply_headup_angle(manager, angle: int):
     """Set head-up display angle."""
@@ -310,17 +341,13 @@ async def apply_headup_angle(manager, angle: int):
     await send_command_to_glasses(manager, command)
     logging.info(f"Head-up display angle set to {angle} degrees.")
 
-async def apply_dashboard_show(manager, state: DashboardState):
-    """Show or hide the dashboard."""
-    command = construct_dashboard_show(state)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Dashboard {state.name.lower()}.")
 
-async def add_or_update_note(manager, note_number: int, note_text: str):
+async def add_or_update_note(manager, note_number: int, title: str, text: str):
     """Add or update a note on the glasses."""
-    command = construct_note_add(note_number, note_text)
+    command = construct_note_add(note_number, title, text)
     await send_command_to_glasses(manager, command)
     logging.info(f"Note {note_number} added/updated.")
+
 
 async def delete_note(manager, note_number: int):
     """Delete a note from the glasses."""
@@ -328,9 +355,12 @@ async def delete_note(manager, note_number: int):
     await send_command_to_glasses(manager, command)
     logging.info(f"Note {note_number} deleted.")
 
+
 async def send_command_to_glasses(manager, command):
     """Helper function to send a command to the glasses."""
     if manager.left_glass:
         await manager.left_glass.send(command)
+        await asyncio.sleep(0.1)
     if manager.right_glass:
         await manager.right_glass.send(command)
+        await asyncio.sleep(0.1)
