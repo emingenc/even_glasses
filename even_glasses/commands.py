@@ -1,7 +1,4 @@
 from even_glasses.models import (
-    Command,
-    SubCommand,
-    MicStatus,
     SendResult,
     ScreenAction,
     AIStatus,
@@ -14,19 +11,15 @@ from even_glasses.models import (
 import asyncio
 import logging
 from typing import List
-from even_glasses.utils import construct_notification
-
-
-def construct_start_ai(subcmd: SubCommand, param: bytes = b"") -> bytes:
-    return bytes([Command.START_AI, subcmd]) + param
-
-
-def construct_mic_command(enable: MicStatus) -> bytes:
-    return bytes([Command.OPEN_MIC, enable])
-
-
-def construct_result(result: SendResult) -> bytes:
-    return result.build()
+from even_glasses.utils import (
+    construct_note_add,
+    construct_silent_mode,
+    construct_brightness,
+    construct_dashboard_show_state,
+    construct_headup_angle,
+    construct_note_delete,
+    construct_notification,
+)
 
 
 def format_text_lines(text: str) -> list:
@@ -202,158 +195,92 @@ async def send_notification(manager, notification: NCSNotification):
     """Send a notification to the glasses."""
     notification_chunks = await construct_notification(notification)
     for chunk in notification_chunks:
-        await manager.left_glass.send(chunk)
-        await manager.right_glass.send(chunk)
+        await send_command_to_glasses(manager, chunk)
         print(f"Sent chunk to glasses: {chunk}")
         await asyncio.sleep(0.01)  # Small delay between chunks
 
 
-def construct_silent_mode(status: SilentModeStatus) -> bytes:
-    """Construct command to set silent mode."""
-    return bytes([Command.SILENT_MODE, status, 0x00])
-
-
-def construct_brightness(level: int, auto: BrightnessAuto) -> bytes:
-    """Construct command to set brightness with auto setting."""
-    if not 0x00 <= level <= 0x29:
-        raise ValueError("Brightness level must be between 0x00 and 0x29")
-    return bytes([Command.BRIGHTNESS, level, auto])
-
-
-def construct_dashboard_show_state(state: DashboardState, position: int) -> bytes:
-    """Construct command to show or hide the dashboard with position."""
-    state_value = 0x01 if state == DashboardState.ON else 0x00
-    return bytes(
-        [Command.DASHBOARD_POSITION, 0x07, 0x00, 0x01, 0x02, state_value, position]
-    )
+async def execute_command(manager, construct_func, *args, log_message: str = ""):
+    """Generic function to construct a command, send it to glasses, and log the action."""
+    command = construct_func(*args)
+    await send_command_to_glasses(manager, command)
+    if log_message:
+        logging.info(log_message)
 
 
 async def show_dashboard(manager, position: int):
     """Show the dashboard at the specified position."""
-    command = construct_dashboard_show_state(DashboardState.ON, position)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Dashboard shown at position {position}.")
+    await execute_command(
+        manager,
+        construct_dashboard_show_state,
+        DashboardState.ON,
+        position,
+        log_message=f"Dashboard shown at position {position}.",
+    )
 
 
 async def hide_dashboard(manager, position: int):
     """Hide the dashboard."""
-    command = construct_dashboard_show_state(DashboardState.OFF, position)
-    await send_command_to_glasses(manager, command)
-    logging.info("Dashboard hidden.")
-
-
-def construct_headup_angle(angle: int) -> bytes:
-    """Construct command to set head-up display angle."""
-    if not 0 <= angle <= 60:
-        raise ValueError("Angle must be between 0 and 60 degrees")
-    angle_byte = angle & 0xFF
-    return bytes([Command.HEADUP_ANGLE, angle_byte, 0x01])
-
-
-def construct_note_delete(note_number: int) -> bytes:
-    """Construct command to delete a note with the given number."""
-    if not 1 <= note_number <= 4:
-        raise ValueError("Note number must be between 1 and 4")
-    return bytes(
-        [
-            0x1E,
-            0x10,
-            0x00,
-            0xE0,
-            0x03,
-            0x01,
-            0x00,
-            0x01,
-            0x00,
-            note_number,
-            0x00,
-            0x01,
-            0x00,
-            0x01,
-            0x00,
-            0x00,
-        ]
-    )
-
-
-def construct_note_add(note_number: int, name: str, text: str) -> bytes:
-    """Construct command to add or change a note with a name and text."""
-    if not 1 <= note_number <= 4:
-        raise ValueError("Note number must be between 1 and 4")
-
-    # Encode name and text to UTF-8 bytes
-    name_bytes = name.encode('utf-8')  # Name of the note
-    text_bytes = text.encode('utf-8')  # Text of the note
-
-    # Construct the command bytes according to the specification
-    cmd = bytes([
-        0x1E,  # Command code
-        0x16,  # Subcommand code
-        0x00, 0x70,  # Fixed bytes
-        0x03, 0x01,  # Fixed bytes
-        0x00, 0x01,  # Fixed bytes
-        0x00, note_number,  # Note number (1-4)
-        0x01, 0x04,  # Fixed bytes
-    ]) + name_bytes + bytes([0x04, 0x00]) + text_bytes + bytes([0x00, 0x00])
-
-    return cmd
-
-
-def construct_clear_screen() -> bytes:
-    """Construct command to clear the screen."""
-    return bytes(
-        [
-            Command.START_AI,
-            SubCommand.STOP,
-            0x00,
-            0x00,
-            0x00,
-        ]
+    await execute_command(
+        manager,
+        construct_dashboard_show_state,
+        DashboardState.OFF,
+        position,
+        log_message="Dashboard hidden.",
     )
 
 
 async def apply_silent_mode(manager, status: SilentModeStatus):
     """Apply silent mode setting."""
-    command = construct_silent_mode(status)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Silent Mode set to {status.name}.")
+    await execute_command(
+        manager,
+        construct_silent_mode,
+        status,
+        log_message=f"Silent Mode set to {status.name}.",
+    )
 
 
 async def apply_brightness(manager, level: int, auto: BrightnessAuto):
     """Apply brightness setting."""
-    command = construct_brightness(level, auto)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Brightness set to {level} with Auto {auto.name}.")
-
-
-async def apply_dashboard_position(manager, position: int, state: DashboardState):
-    """Set dashboard position."""
-    if state == DashboardState.ON:
-        await show_dashboard(manager, position)
-    else:
-        await hide_dashboard(manager, position)
-    logging.info(f"Dashboard position set to {position}.")
+    await execute_command(
+        manager,
+        construct_brightness,
+        level,
+        auto,
+        log_message=f"Brightness set to {level} with Auto {auto.name}.",
+    )
 
 
 async def apply_headup_angle(manager, angle: int):
     """Set head-up display angle."""
-    command = construct_headup_angle(angle)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Head-up display angle set to {angle} degrees.")
+    await execute_command(
+        manager,
+        construct_headup_angle,
+        angle,
+        log_message=f"Head-up display angle set to {angle} degrees.",
+    )
 
 
 async def add_or_update_note(manager, note_number: int, title: str, text: str):
     """Add or update a note on the glasses."""
-    command = construct_note_add(note_number, title, text)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Note {note_number} added/updated.")
+    await execute_command(
+        manager,
+        construct_note_add,
+        note_number,
+        title,
+        text,
+        log_message=f"Note {note_number} added/updated.",
+    )
 
 
 async def delete_note(manager, note_number: int):
     """Delete a note from the glasses."""
-    command = construct_note_delete(note_number)
-    await send_command_to_glasses(manager, command)
-    logging.info(f"Note {note_number} deleted.")
+    await execute_command(
+        manager,
+        construct_note_delete,
+        note_number,
+        log_message=f"Note {note_number} deleted.",
+    )
 
 
 async def send_command_to_glasses(manager, command):

@@ -167,3 +167,32 @@ class BleReceive(BaseModel):
     cmd: int = Field(default=0x00)
     data: bytes = Field(default_factory=bytes)
     is_timeout: bool = Field(default=False)
+
+class NoteAdd(BaseModel):
+    command: int = Field(default=0x1E)
+    note_number: int = Field(..., description="Note number (1-4)")
+    name: str = Field(..., description="Note name (max 4 characters)")
+    text: str = Field(..., description="Note text (max 2 characters)")
+
+    def build(self) -> bytes:
+        # Ensure the name and text meet the required lengths
+        name_bytes = self.name.encode('utf-8')
+        text_bytes = self.text.encode('utf-8')
+
+        cmd = (
+            bytes([
+                self.command,
+                0x16,
+                0x00,
+                0x70,
+                0x03,
+                0x01,
+                0x00,
+                0x01,
+                0x00,
+                self.note_number,
+                0x01,
+                0x04,
+            ]) + name_bytes + bytes([0x04, 0x00]) + text_bytes + bytes([0x00, 0x00])
+        )
+        return cmd
