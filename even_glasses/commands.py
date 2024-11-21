@@ -7,6 +7,9 @@ from even_glasses.models import (
     AIStatus,
     RSVPConfig,
     NCSNotification,
+    SilentModeStatus,
+    BrightnessAuto,
+    DashboardState,
 )
 import asyncio
 import logging
@@ -84,6 +87,7 @@ async def send_text_packet(
 
 
 async def send_text(manager, text_message: str, duration: float = 5) -> str:
+    """Send text message to the glasses display."""
     lines = format_text_lines(text_message)
     total_pages = (len(lines) + 4) // 5  # 5 lines per page
 
@@ -205,3 +209,128 @@ async def send_notification(manager, notification: NCSNotification):
             await manager.right_glass.send(chunk)
             print(f"Sent chunk to glasses: {chunk}")
             await asyncio.sleep(0.01)  # Small delay between chunks
+
+
+def construct_silent_mode(status: SilentModeStatus) -> bytes:
+    """Construct command to set silent mode."""
+    return bytes([Command.SILENT_MODE, status, 0x00])
+
+def construct_brightness(level: int, auto: BrightnessAuto) -> bytes:
+    """Construct command to set brightness with auto setting."""
+    if not 0x00 <= level <= 0x29:
+        raise ValueError("Brightness level must be between 0x00 and 0x29")
+    return bytes([Command.BRIGHTNESS, level, auto])
+
+def construct_dashboard_position(position: int) -> bytes:
+    """Construct command to set dashboard position."""
+    if not 0x00 <= position <= 0x08:
+        raise ValueError("Position must be between 0x00 and 0x08")
+    # Corrected command according to BLE Cheatsheet
+    return bytes([
+        Command.DASHBOARD_POSITION, 0x07, 0x00, 0x01, 0x02, 0x01, position
+    ])
+
+def construct_headup_angle(angle: int) -> bytes:
+    """Construct command to set head-up display angle."""
+    if not 0 <= angle <= 60:
+        raise ValueError("Angle must be between 0 and 60 degrees")
+    angle_byte = angle & 0xFF
+    return bytes([Command.HEADUP_ANGLE, angle_byte, 0x01])
+
+def construct_dashboard_show(state: DashboardState) -> bytes:
+    """Construct command to show or hide the dashboard."""
+    # Ensure state is 0x01 for ON and 0x00 for OFF
+    state_value = 0x01 if state == DashboardState.ON else 0x00
+    return bytes([
+        Command.DASHBOARD_SHOW, 0x00, 0x04, 0x02, state_value
+    ])
+
+def construct_note_delete(note_number: int) -> bytes:
+    """Construct command to delete a note with the given number."""
+    if not 1 <= note_number <= 4:
+        raise ValueError("Note number must be between 1 and 4")
+    return bytes([
+        0x1E, 0x10, 0x00, 0xE0, 0x03, 0x01, 0x00, 0x01,
+        0x00, note_number, 0x00, 0x01, 0x00, 0x01,
+        0x00, 0x00
+    ])
+
+def construct_note_add(note_number: int, note_text: str) -> bytes:
+    """Construct command to add or change a note."""
+    if not 1 <= note_number <= 4:
+        raise ValueError("Note number must be between 1 and 4")
+    # Encode note text to UTF-8 and add null terminator
+    text_bytes = note_text.encode('utf-8') + b'\x00\x00'
+    text_length = len(text_bytes)
+    # Update length bytes in the command
+    length = 0x12 + text_length  # Base length is 0x12, adjust with text length
+    length_bytes = length.to_bytes(2, byteorder='little')
+    cmd = bytes([
+        0x1E,                   # Command code
+        length_bytes[0],        # Length LSB
+        length_bytes[1],        # Length MSB
+        0x70, 0x03, 0x01, 0x00, 0x01,
+        0x00, note_number,      # Note number
+        0x01, 0x04
+    ]) + text_bytes
+    return cmd
+
+def construct_clear_screen() -> bytes:
+    """Construct command to clear the screen."""
+    return bytes([
+        Command.START_AI, 
+        SubCommand.STOP,
+        0x00,
+        0x00,
+        0x00,
+    ])
+    
+
+async def apply_silent_mode(manager, status: SilentModeStatus):
+    """Apply silent mode setting."""
+    command = construct_silent_mode(status)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Silent Mode set to {status.name}.")
+
+async def apply_brightness(manager, level: int, auto: BrightnessAuto):
+    """Apply brightness setting."""
+    command = construct_brightness(level, auto)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Brightness set to {level} with Auto {auto.name}.")
+
+async def apply_dashboard_position(manager, position: int):
+    """Set dashboard position."""
+    command = construct_dashboard_position(position)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Dashboard position set to {position}.")
+
+async def apply_headup_angle(manager, angle: int):
+    """Set head-up display angle."""
+    command = construct_headup_angle(angle)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Head-up display angle set to {angle} degrees.")
+
+async def apply_dashboard_show(manager, state: DashboardState):
+    """Show or hide the dashboard."""
+    command = construct_dashboard_show(state)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Dashboard {state.name.lower()}.")
+
+async def add_or_update_note(manager, note_number: int, note_text: str):
+    """Add or update a note on the glasses."""
+    command = construct_note_add(note_number, note_text)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Note {note_number} added/updated.")
+
+async def delete_note(manager, note_number: int):
+    """Delete a note from the glasses."""
+    command = construct_note_delete(note_number)
+    await send_command_to_glasses(manager, command)
+    logging.info(f"Note {note_number} deleted.")
+
+async def send_command_to_glasses(manager, command):
+    """Helper function to send a command to the glasses."""
+    if manager.left_glass:
+        await manager.left_glass.send(command)
+    if manager.right_glass:
+        await manager.right_glass.send(command)
