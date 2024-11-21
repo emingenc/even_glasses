@@ -20,7 +20,11 @@ class Command(IntEnum):
     QUICK_NOTE = 0x21
     DASHBOARD = 0x22
     NOTIFICATION = 0x4B
-
+    SILENT_MODE = 0x03
+    BRIGHTNESS = 0x01
+    DASHBOARD_POSITION = 0x26
+    HEADUP_ANGLE = 0x0B
+    DASHBOARD_SHOW = 0x06
 
 class SubCommand(IntEnum):
     EXIT = 0x00
@@ -28,20 +32,16 @@ class SubCommand(IntEnum):
     START = 0x17
     STOP = 0x18
 
-
 class MicStatus(IntEnum):
     ENABLE = 0x01
     DISABLE = 0x00
-
 
 class ResponseStatus(IntEnum):
     SUCCESS = 0xC9
     FAILURE = 0xCA
 
-
 class ScreenAction(IntEnum):
     NEW_CONTENT = 0x01
-
 
 class AIStatus(IntEnum):
     DISPLAYING = 0x30  # Even AI displaying (automatic mode default)
@@ -49,6 +49,28 @@ class AIStatus(IntEnum):
     MANUAL_MODE = 0x50  # Even AI manual mode
     NETWORK_ERROR = 0x60  # Even AI network error
 
+class SilentModeStatus(IntEnum):
+    OFF = 0x0A
+    ON = 0x0C
+
+class BrightnessAuto(IntEnum):
+    OFF = 0x00
+    ON = 0x01
+
+class DashboardPosition(IntEnum):
+    POSITION_0 = 0x00  # Bottom
+    POSITION_1 = 0x01
+    POSITION_2 = 0x02
+    POSITION_3 = 0x03
+    POSITION_4 = 0x04
+    POSITION_5 = 0x05
+    POSITION_6 = 0x06
+    POSITION_7 = 0x07
+    POSITION_8 = 0x08  # Top
+
+class DashboardState(IntEnum):
+    OFF = 0x00
+    ON = 0x01
 
 class SendResult(BaseModel):
     command: int = Field(default=Command.SEND_RESULT)
@@ -78,7 +100,6 @@ class SendResult(BaseModel):
         )
         return header + self.data
 
-
 class NCSNotification(BaseModel):
     msg_id: int = Field(..., alias="msg_id", description="Message ID")
     type: int = Field(1, alias="type", description="Notification type")
@@ -102,7 +123,6 @@ class NCSNotification(BaseModel):
 
     class ConfigDict:
         populate_by_name = True
-
 
 class Notification(BaseModel):
     ncs_notification: NCSNotification = Field(
@@ -137,12 +157,10 @@ class Notification(BaseModel):
             encoded_chunks.append(encoded_chunk)
         return encoded_chunks
 
-
 class RSVPConfig(BaseModel):
     words_per_group: int = Field(default=1)
     wpm: int = Field(default=250)
     padding_char: str = Field(default="...")
-
 
 class BleReceive(BaseModel):
     lr: str = Field(default="L", description="Left or Right")
