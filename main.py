@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Initialize GlassesManager
 manager = GlassesManager(left_address=None, right_address=None)
 
-DEBUG = True  # Toggle for debug features
+DEBUG = False  # Toggle for debug features
 
 async def main(page: ft.Page):
     page.title = "Glasses Control Panel"

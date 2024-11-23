@@ -15,7 +15,7 @@ from even_glasses.models import (
 )
 
 
-DEBUG = True
+DEBUG = False
 
 
 class CommandLogger:
