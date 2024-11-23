@@ -1,12 +1,28 @@
 import asyncio
-import json
 import flet as ft
-from flet import alignment
 from even_glasses.bluetooth_manager import GlassesManager
-from even_glasses.commands import send_text, send_rsvp, send_notification
 from even_glasses.models import NCSNotification, RSVPConfig
 from even_glasses.notification_handlers import handle_incoming_notification
 import logging
+
+from even_glasses.models import (
+    SilentModeStatus,
+    BrightnessAuto,
+    GlassesWearStatus,
+)
+from even_glasses.commands import (
+    send_text,
+    send_rsvp,
+    send_notification,
+    apply_silent_mode,
+    apply_brightness,
+    apply_headup_angle,
+    add_or_update_note,
+    delete_note,
+    show_dashboard,
+    hide_dashboard,
+    apply_glasses_wear,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -318,6 +334,139 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             spacing=10,
         ), side_input, data_input, send_command_button
 
+    # Create Settings Section
+    def create_settings_section():
+        settings_header = ft.Text(
+            value="Glasses Settings", size=18, weight=ft.FontWeight.BOLD
+        )
+
+        # Silent Mode Toggle
+        silent_mode_switch = ft.Switch(label="Silent Mode")
+        silent_mode_button = ft.ElevatedButton(text="Apply Silent Mode")
+
+        # Brightness Control
+        brightness_slider = ft.Slider(
+            label="Brightness Level",
+            min=0,
+            max=41,
+            divisions=41,
+            value=20,
+            tooltip="Adjust brightness level (0-41)"
+        )
+        brightness_auto_switch = ft.Switch(label="Auto Brightness")
+        brightness_button = ft.ElevatedButton(text="Apply Brightness")
+
+        # Dashboard Position Selector
+        dashboard_position_dropdown = ft.Dropdown(
+            label="Dashboard Position",
+            options=[
+                ft.dropdown.Option(key=str(i), text=f"Position {i}") for i in range(9)
+            ],
+            value="0",
+        )
+        show_dashboard_button = ft.ElevatedButton(
+            text="Show Dashboard",
+        )
+        hide_dashboard_button = ft.ElevatedButton(
+            text="Hide Dashboard",
+        )
+
+        # Head-up Angle Control
+        headup_angle_slider = ft.Slider(
+            label="Head-up Display Angle",
+            min=0,
+            max=60,
+            divisions=60,
+            value=30,
+            tooltip="Adjust head-up display angle (0-60 degrees)"
+        )
+        headup_angle_button = ft.ElevatedButton(text="Apply Head-up Angle")
+
+        # Note Management
+        note_number_dropdown = ft.Dropdown(
+            label="Note Number",
+            options=[
+                ft.dropdown.Option(key=str(i), text=f"Note {i}") for i in range(1, 5)
+            ],
+            value="1",
+        )
+        note_title_input = ft.TextField(
+            label="Note Title",
+            multiline=False,
+            expand=True,
+        )
+            
+        note_text_input = ft.TextField(
+            label="Note Text",
+            multiline=False,
+            expand=True,
+        )
+        note_add_button = ft.ElevatedButton(text="Add/Update Note")
+        note_delete_button = ft.ElevatedButton(text="Delete Note")
+
+        # Glasses Wear Detection Controls
+        glasses_wear_switch = ft.Switch(label="Enable Glasses Wear Detection")
+        glasses_wear_button = ft.ElevatedButton(text="Apply Glasses Wear Setting")
+
+        # Assemble Settings Sections
+        settings_section = ft.Column(
+            [
+                settings_header,
+                ft.Divider(),
+                ft.Text("Silent Mode", size=16, weight=ft.FontWeight.BOLD),
+                silent_mode_switch,
+                silent_mode_button,
+                ft.Divider(),
+                ft.Text("Brightness Control", size=16, weight=ft.FontWeight.BOLD),
+                brightness_slider,
+                brightness_auto_switch,
+                brightness_button,
+                ft.Divider(),
+                ft.Text("Dashboard Control", size=16, weight=ft.FontWeight.BOLD),
+                dashboard_position_dropdown,
+                ft.Row(
+                    [show_dashboard_button, hide_dashboard_button],
+                    alignment=ft.MainAxisAlignment.START,
+                    spacing=10,
+                ),
+                ft.Divider(),
+                ft.Text("Head-up Display Angle", size=16, weight=ft.FontWeight.BOLD),
+                headup_angle_slider,
+                headup_angle_button,
+                ft.Divider(),
+                ft.Text("Note Management", size=16, weight=ft.FontWeight.BOLD),
+                ft.Row([note_number_dropdown, note_title_input, note_text_input], spacing=10),
+                ft.Row([note_add_button, note_delete_button], spacing=10),
+                ft.Divider(),
+                ft.Text("Glasses Wear Detection", size=16, weight=ft.FontWeight.BOLD),
+                glasses_wear_switch,
+                glasses_wear_button,
+            ],
+            spacing=10,
+            expand=True,
+        )
+
+        return (
+            settings_section,
+            silent_mode_switch,
+            silent_mode_button,
+            brightness_slider,
+            brightness_auto_switch,
+            brightness_button,
+            dashboard_position_dropdown,
+            show_dashboard_button,
+            hide_dashboard_button,
+            headup_angle_slider,
+            headup_angle_button,
+            note_number_dropdown,
+            note_title_input,
+            note_text_input,
+            note_add_button,
+            note_delete_button,
+            glasses_wear_switch,    # Include the new switch
+            glasses_wear_button,    # Include the new button
+        )
+
     # Create Components
     status_section, left_status_icon, right_status_icon, left_status_text, right_status_text = create_status_section()
     connection_buttons, connect_button, disconnect_button = create_connection_buttons()
@@ -350,6 +499,27 @@ End of demo text. Thank you for trying out the RSVP feature!"""
 
     if DEBUG:
         command_section, side_input, data_input, send_command_button = create_command_section()
+
+    (
+        settings_section,
+        silent_mode_switch,
+        silent_mode_button,
+        brightness_slider,
+        brightness_auto_switch,
+        brightness_button,
+        dashboard_position_dropdown,
+        show_dashboard_button,
+        hide_dashboard_button,
+        headup_angle_slider,
+        headup_angle_button,
+        note_number_dropdown,
+        note_title_input,
+        note_text_input,
+        note_add_button,
+        note_delete_button,
+        glasses_wear_switch,    # Include the new switch
+        glasses_wear_button,    # Include the new button
+    ) = create_settings_section()
 
     # Update Status Function
     def on_status_changed():
@@ -397,6 +567,14 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         start_rsvp_button.disabled = not connected
         if DEBUG:
             send_command_button.disabled = not connected
+        silent_mode_button.disabled = not connected
+        brightness_button.disabled = not connected
+        show_dashboard_button.disabled = not connected
+        hide_dashboard_button.disabled = not connected
+        headup_angle_button.disabled = not connected
+        note_add_button.disabled = not connected
+        note_delete_button.disabled = not connected
+        glasses_wear_button.disabled = not connected
         page.update()
 
     # Async Event Handlers
@@ -429,85 +607,52 @@ End of demo text. Thank you for trying out the RSVP feature!"""
 
     async def send_message(e):
         try:
-            msg = message_input.value
-            if not msg:
-                page.show_snack_bar(ft.SnackBar(content=ft.Text("Please enter a message")))
+            message = message_input.value.strip()
+            if not message:
+                log_message("Please enter a message to send.")
                 return
-            success = await send_text(manager, msg)
-            if success:
-                log_message(f"Sent message to glasses: {msg}")
-            else:
-                log_message(f"Failed to send message to glasses: {msg}")
-            message_input.value = ""
-            page.update()
+            await send_text(manager, message)
+            log_message(f"Message sent: {message}")
         except Exception as ex:
-            page.show_snack_bar(ft.SnackBar(content=ft.Text(f"Error: {str(ex)}")))
+            log_message(f"Error sending message: {ex}")
 
     async def send_custom_notification(e):
         try:
-            msg_id = int(msg_id_input.value)
-            app_identifier = app_identifier_field.value
-            title = title_input.value
-            subtitle = subtitle_input.value
-            message = notification_message_input.value
-            display_name = display_name_input.value
-
             notification = NCSNotification(
-                msg_id=msg_id,
-                app_identifier=app_identifier,
-                title=title,
-                subtitle=subtitle,
-                message=message,
-                display_name=display_name,
+                msg_id=int(msg_id_input.value),
+                app_identifier=app_identifier_field.value,
+                title=title_input.value,
+                subtitle=subtitle_input.value,
+                message=notification_message_input.value,
+                display_name=display_name_input.value,
             )
-
-            success = await send_notification(manager, notification)
-            if success:
-                log_message(
-                    f"Sent notification: {json.dumps(notification.model_dump(by_alias=True), separators=(',', ':'))}"
-                )
-            else:
-                log_message("Failed to send notification.")
-
-            page.update()
-        except ValueError:
-            log_message("Invalid Message ID. Please enter a numeric value.")
+            await send_notification(manager, notification)
+            log_message("Notification sent.")
+        except ValueError as ex:
+            log_message(f"Error creating notification: {ex}")
 
     async def start_rsvp(e):
         try:
-            words_count = int(words_per_group.value)
-            speed = int(wpm_input.value)
-            pad_char = padding_char.value or "..."
-
             config = RSVPConfig(
-                words_per_group=words_count,
-                wpm=speed,
-                padding_char=pad_char,
-                retry_delay=0.005,
-                max_retries=2,
+                words_per_group=int(words_per_group.value),
+                wpm=int(wpm_input.value),
+                padding_char=padding_char.value,
             )
-
-            start_rsvp_button.disabled = True
-            rsvp_status.value = "RSVP Status: Running..."
+            text = rsvp_text.value.strip()
+            if not text:
+                log_message("Please enter text for RSVP.")
+                return
+            rsvp_status.value = "RSVP Status: Running"
             page.update()
-
-            success = await send_rsvp(manager, rsvp_text.value, config)
-
-            if success:
-                rsvp_status.value = "RSVP Status: Complete"
-                log_message("RSVP completed successfully.")
-            else:
-                rsvp_status.value = "RSVP Status: Failed"
-                log_message("RSVP failed.")
-
-            page.update()
-
-        except ValueError as e:
-            log_message(f"RSVP Error: Invalid number format - {str(e)}")
-        except Exception as e:
-            log_message(f"RSVP Error: {str(e)}")
+            await send_rsvp(manager, text, config)
+            rsvp_status.value = "RSVP Status: Completed"
+            log_message("RSVP completed.")
+        except ValueError as ex:
+            log_message(f"Error starting RSVP: {ex}")
+        except Exception as ex:
+            log_message(f"Error during RSVP: {ex}")
         finally:
-            start_rsvp_button.disabled = False
+            rsvp_status.value = "RSVP Status: Ready"
             page.update()
 
     async def send_command_to_device(e):
@@ -546,6 +691,55 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         log_message(f"Sent command to device '{device}': {data_bytes.hex()}")
         page.update()
 
+    async def apply_silent_mode_handler(e):
+        status = SilentModeStatus.ON if silent_mode_switch.value else SilentModeStatus.OFF
+        await apply_silent_mode(manager, status)
+        log_message(f"Silent Mode set to {status.name}.")
+
+    async def apply_brightness_handler(e):
+        level = int(brightness_slider.value)
+        auto = BrightnessAuto.ON if brightness_auto_switch.value else BrightnessAuto.OFF
+        await apply_brightness(manager, level, auto)
+        log_message(f"Brightness set to {level} with Auto {auto.name}.")
+
+    async def show_dashboard_handler(e):
+        try:
+            position = int(dashboard_position_dropdown.value)
+            await show_dashboard(manager, position)
+            log_message(f"Dashboard shown at position {position}.")
+        except ValueError:
+            log_message("Invalid dashboard position selected.")
+
+    async def hide_dashboard_handler(e):
+        position = int(dashboard_position_dropdown.value)
+        await hide_dashboard(manager, position)
+        log_message("Dashboard hidden.")
+
+    async def apply_headup_angle_handler(e):
+        angle = int(headup_angle_slider.value)
+        await apply_headup_angle(manager, angle)
+        log_message(f"Head-up display angle set to {angle} degrees.")
+
+    async def add_or_update_note_handler(e):
+        note_number = int(note_number_dropdown.value)
+        note_title_value = note_title_input.value.strip()
+        note_text_value = note_text_input.value.strip()
+        if not note_text_value or not note_title_value:
+            log_message("Please enter note text.")
+            return
+        await add_or_update_note(manager, note_number, note_title_value, note_text_value)
+        log_message(f"Note {note_number} added/updated.")
+
+    async def delete_note_handler(e):
+        note_number = int(note_number_dropdown.value)
+        await delete_note(manager, note_number)
+        log_message(f"Note {note_number} deleted.")
+
+    async def apply_glasses_wear_handler(e):
+        status = GlassesWearStatus.ON if glasses_wear_switch.value else GlassesWearStatus.OFF
+        await apply_glasses_wear(manager, status)
+        log_message(f"Glasses Wear Detection set to {status.name}.")
+
     def on_keyboard(e: ft.KeyboardEvent):
         if e.key == "Enter" and e.ctrl:
             send_message(None)
@@ -559,6 +753,14 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     start_rsvp_button.on_click = start_rsvp
     if DEBUG:
         send_command_button.on_click = send_command_to_device
+    silent_mode_button.on_click = apply_silent_mode_handler
+    brightness_button.on_click = apply_brightness_handler
+    headup_angle_button.on_click = apply_headup_angle_handler
+    note_add_button.on_click = add_or_update_note_handler
+    note_delete_button.on_click = delete_note_handler
+    hide_dashboard_button.on_click = hide_dashboard_handler
+    show_dashboard_button.on_click = show_dashboard_handler
+    glasses_wear_button.on_click = apply_glasses_wear_handler
 
     # Organize UI into Tabs
     tabs = ft.Tabs(
@@ -607,6 +809,15 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 icon=ft.icons.BUG_REPORT,
             )
         )
+
+    # Add settings tab to the application
+    tabs.tabs.append(
+        ft.Tab(
+            text="Settings",
+            content=settings_section,
+            icon=ft.icons.SETTINGS,
+        )
+    )
 
     # Main Layout
     main_content = ft.Column(

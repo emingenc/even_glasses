@@ -15,7 +15,7 @@ from even_glasses.models import (
 )
 
 
-DEBUG = True
+DEBUG = False
 
 
 class CommandLogger:
@@ -223,7 +223,9 @@ class CommandLogger:
 command_logger = CommandLogger()
 
 
-def debug_command_logs(side: str, sender: UUID | int | str, data: bytes | bytearray):
+def debug_command_logs(side: str,
+                       sender: Union[UUID, int, str],
+                       data: bytes | bytearray):
     # Log the command first
     cmd_log = command_logger.log_command(side, sender, data)
 

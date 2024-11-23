@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Literal
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal, List
 import time
 import json
 from enum import IntEnum
@@ -20,28 +20,35 @@ class Command(IntEnum):
     QUICK_NOTE = 0x21
     DASHBOARD = 0x22
     NOTIFICATION = 0x4B
-
+    SILENT_MODE = 0x03
+    BRIGHTNESS = 0x01
+    DASHBOARD_POSITION = 0x26
+    HEADUP_ANGLE = 0x0B
+    DASHBOARD_SHOW = 0x06
+    GLASSES_WEAR = 0x27
+    
+class GlassesWearStatus(IntEnum):
+    ON = 0x01
+    OFF = 0x00
 
 class SubCommand(IntEnum):
     EXIT = 0x00
     PAGE_CONTROL = 0x01
     START = 0x17
     STOP = 0x18
-
+    PUT_ON = 0x06
+    TAKEN_OFF = 0x07
 
 class MicStatus(IntEnum):
     ENABLE = 0x01
     DISABLE = 0x00
 
-
 class ResponseStatus(IntEnum):
     SUCCESS = 0xC9
     FAILURE = 0xCA
 
-
 class ScreenAction(IntEnum):
     NEW_CONTENT = 0x01
-
 
 class AIStatus(IntEnum):
     DISPLAYING = 0x30  # Even AI displaying (automatic mode default)
@@ -49,6 +56,28 @@ class AIStatus(IntEnum):
     MANUAL_MODE = 0x50  # Even AI manual mode
     NETWORK_ERROR = 0x60  # Even AI network error
 
+class SilentModeStatus(IntEnum):
+    OFF = 0x0A
+    ON = 0x0C
+
+class BrightnessAuto(IntEnum):
+    OFF = 0x00
+    ON = 0x01
+
+class DashboardPosition(IntEnum):
+    POSITION_0 = 0x00  # Bottom
+    POSITION_1 = 0x01
+    POSITION_2 = 0x02
+    POSITION_3 = 0x03
+    POSITION_4 = 0x04
+    POSITION_5 = 0x05
+    POSITION_6 = 0x06
+    POSITION_7 = 0x07
+    POSITION_8 = 0x08  # Top
+
+class DashboardState(IntEnum):
+    OFF = 0x00
+    ON = 0x01
 
 class SendResult(BaseModel):
     command: int = Field(default=Command.SEND_RESULT)
@@ -78,7 +107,6 @@ class SendResult(BaseModel):
         )
         return header + self.data
 
-
 class NCSNotification(BaseModel):
     msg_id: int = Field(..., alias="msg_id", description="Message ID")
     type: int = Field(1, alias="type", description="Notification type")
@@ -102,7 +130,6 @@ class NCSNotification(BaseModel):
 
     class ConfigDict:
         populate_by_name = True
-
 
 class Notification(BaseModel):
     ncs_notification: NCSNotification = Field(
@@ -137,15 +164,90 @@ class Notification(BaseModel):
             encoded_chunks.append(encoded_chunk)
         return encoded_chunks
 
-
 class RSVPConfig(BaseModel):
     words_per_group: int = Field(default=1)
     wpm: int = Field(default=250)
     padding_char: str = Field(default="...")
-
 
 class BleReceive(BaseModel):
     lr: str = Field(default="L", description="Left or Right")
     cmd: int = Field(default=0x00)
     data: bytes = Field(default_factory=bytes)
     is_timeout: bool = Field(default=False)
+
+class NoteConstants(IntEnum):
+    COMMAND = 0x1E
+    FIXED_BYTE = 0x00
+    FIXED_BYTE_2 = 0x01
+
+class NoteAdd(BaseModel):
+    command: int = Field(default=NoteConstants.COMMAND)
+    note_number: int = Field(..., description="Note number (1-4)")
+    name: str = Field(..., description="Note name")
+    text: str = Field(..., description="Note text")
+
+    @field_validator('note_number')
+    def validate_note_number(cls, v):
+        if not 1 <= v <= 4:
+            raise ValueError('Note number must be between 1 and 4')
+        return v
+
+    def _get_fixed_bytes(self) -> bytes:
+        """Return the fixed bytes sequence"""
+        return bytes([0x03, 0x01, 0x00, 0x01, 0x00])
+
+    def _get_versioning_byte(self) -> int:
+        """Generate versioning byte based on timestamp"""
+        return int(time.time()) % 256
+
+    def _calculate_payload_length(self, name_bytes: bytes, text_bytes: bytes) -> int:
+        """Calculate total payload length"""
+        components: List[int] = [
+            1,  # Fixed byte
+            1,  # Versioning byte
+            len(self._get_fixed_bytes()),  # Fixed bytes sequence
+            1,  # Note number
+            1,  # Fixed byte 2
+            1,  # Title length
+            len(name_bytes),  # Title bytes
+            1,  # Text length
+            1,  # Fixed byte after text length
+            len(text_bytes),  # Text bytes
+            2,  # Final bytes
+        ]
+        return sum(components)
+
+    def build(self) -> bytes:
+        """Build the command bytes sequence"""
+        # Encode strings
+        name_bytes = self.name.encode('utf-8')
+        text_bytes = self.text.encode('utf-8')
+
+        # Get components
+        payload_length = self._calculate_payload_length(name_bytes, text_bytes)
+        versioning_byte = self._get_versioning_byte()
+        fixed_bytes = self._get_fixed_bytes()
+
+        # Assemble command
+        command = (
+            bytes([
+                self.command,
+                payload_length & 0xFF,
+                NoteConstants.FIXED_BYTE,
+                versioning_byte,
+            ]) 
+            + fixed_bytes 
+            + bytes([
+                self.note_number,
+                NoteConstants.FIXED_BYTE_2,
+                len(name_bytes) & 0xFF,
+            ]) 
+            + name_bytes 
+            + bytes([
+                len(text_bytes) & 0xFF,
+                NoteConstants.FIXED_BYTE,
+            ]) 
+            + text_bytes
+        )
+
+        return command

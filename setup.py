@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='even_glasses',
-    version='0.1.08',
+    version='0.1.09',
     author='Emin Genc',
     author_email='emingench@gmail.com',
     description='A Python package for managing even-realities glasses devices via BLE.',

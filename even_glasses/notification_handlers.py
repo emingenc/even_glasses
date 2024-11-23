@@ -71,6 +71,15 @@ async def handle_start_ai(
         # Handle stopping Even AI recording
         logging.info(f"Handling STOP Even AI recording command from {glass.side}")
         # Implement your logic here
+    elif sub_command == SubCommand.PUT_ON:
+        # Handle glasses put on
+        logging.info(f"Handling PUT_ON command from {glass.side}")
+        # Implement your logic here
+    elif sub_command == SubCommand.TAKEN_OFF:
+        # Handle glasses taken off
+        logging.info(f"Handling TAKEN_OFF command from {glass.side}")
+        # Implement your logic here
+
     else:
         logging.warning(
             f"Unhandled subcommand: {sub_command} received from {glass.side}"
