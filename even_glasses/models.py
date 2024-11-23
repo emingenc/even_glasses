@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Literal
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal, List
 import time
 import json
 from enum import IntEnum
@@ -168,31 +168,79 @@ class BleReceive(BaseModel):
     data: bytes = Field(default_factory=bytes)
     is_timeout: bool = Field(default=False)
 
+class NoteConstants(IntEnum):
+    COMMAND = 0x1E
+    FIXED_BYTE = 0x00
+    FIXED_BYTE_2 = 0x01
+
 class NoteAdd(BaseModel):
-    command: int = Field(default=0x1E)
+    command: int = Field(default=NoteConstants.COMMAND)
     note_number: int = Field(..., description="Note number (1-4)")
-    name: str = Field(..., description="Note name (max 4 characters)")
-    text: str = Field(..., description="Note text (max 2 characters)")
+    name: str = Field(..., description="Note name")
+    text: str = Field(..., description="Note text")
+
+    @field_validator('note_number')
+    def validate_note_number(cls, v):
+        if not 1 <= v <= 4:
+            raise ValueError('Note number must be between 1 and 4')
+        return v
+
+    def _get_fixed_bytes(self) -> bytes:
+        """Return the fixed bytes sequence"""
+        return bytes([0x03, 0x01, 0x00, 0x01, 0x00])
+
+    def _get_versioning_byte(self) -> int:
+        """Generate versioning byte based on timestamp"""
+        return int(time.time()) % 256
+
+    def _calculate_payload_length(self, name_bytes: bytes, text_bytes: bytes) -> int:
+        """Calculate total payload length"""
+        components: List[int] = [
+            1,  # Fixed byte
+            1,  # Versioning byte
+            len(self._get_fixed_bytes()),  # Fixed bytes sequence
+            1,  # Note number
+            1,  # Fixed byte 2
+            1,  # Title length
+            len(name_bytes),  # Title bytes
+            1,  # Text length
+            1,  # Fixed byte after text length
+            len(text_bytes),  # Text bytes
+            2,  # Final bytes
+        ]
+        return sum(components)
 
     def build(self) -> bytes:
-        # Ensure the name and text meet the required lengths
+        """Build the command bytes sequence"""
+        # Encode strings
         name_bytes = self.name.encode('utf-8')
         text_bytes = self.text.encode('utf-8')
 
-        cmd = (
+        # Get components
+        payload_length = self._calculate_payload_length(name_bytes, text_bytes)
+        versioning_byte = self._get_versioning_byte()
+        fixed_bytes = self._get_fixed_bytes()
+
+        # Assemble command
+        command = (
             bytes([
                 self.command,
-                0x16,
-                0x00,
-                0x70,
-                0x03,
-                0x01,
-                0x00,
-                0x01,
-                0x00,
+                payload_length & 0xFF,
+                NoteConstants.FIXED_BYTE,
+                versioning_byte,
+            ]) 
+            + fixed_bytes 
+            + bytes([
                 self.note_number,
-                0x01,
-                0x04,
-            ]) + name_bytes + bytes([0x04, 0x00]) + text_bytes + bytes([0x00, 0x00])
+                NoteConstants.FIXED_BYTE_2,
+                len(name_bytes) & 0xFF,
+            ]) 
+            + name_bytes 
+            + bytes([
+                len(text_bytes) & 0xFF,
+                NoteConstants.FIXED_BYTE,
+            ]) 
+            + text_bytes
         )
-        return cmd
+
+        return command
