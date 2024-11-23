@@ -10,6 +10,7 @@ from even_glasses.models import (
     SilentModeStatus,
     BrightnessAuto,
     DashboardState,
+    GlassesWearStatus,
 )
 
 
@@ -73,6 +74,10 @@ def construct_note_add(note_number: int, name: str, text: str) -> bytes:
     """Construct command to add or change a note with a name and text."""
     note_add = NoteAdd(note_number=note_number, name=name, text=text)
     return note_add.build()
+
+def construct_glasses_wear_command(status: GlassesWearStatus) -> bytes:
+    """Construct command to set glasses wear detection."""
+    return bytes([Command.GLASSES_WEAR, status])
 
 
 def construct_clear_screen() -> bytes:

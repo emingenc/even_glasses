@@ -7,6 +7,7 @@ from even_glasses.models import (
     SilentModeStatus,
     BrightnessAuto,
     DashboardState,
+    GlassesWearStatus,
 )
 import asyncio
 import logging
@@ -19,6 +20,7 @@ from even_glasses.utils import (
     construct_headup_angle,
     construct_note_delete,
     construct_notification,
+    construct_glasses_wear_command,
 )
 
 
@@ -291,3 +293,13 @@ async def send_command_to_glasses(manager, command):
     if manager.right_glass:
         await manager.right_glass.send(command)
         await asyncio.sleep(0.1)
+
+
+async def apply_glasses_wear(manager, status: GlassesWearStatus):
+    """Enable or disable glasses wear detection."""
+    await execute_command(
+        manager,
+        construct_glasses_wear_command,
+        status,
+        log_message=f"Glasses wear detection set to {status.name}."
+    )

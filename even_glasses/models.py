@@ -25,12 +25,19 @@ class Command(IntEnum):
     DASHBOARD_POSITION = 0x26
     HEADUP_ANGLE = 0x0B
     DASHBOARD_SHOW = 0x06
+    GLASSES_WEAR = 0x27
+    
+class GlassesWearStatus(IntEnum):
+    ON = 0x01
+    OFF = 0x00
 
 class SubCommand(IntEnum):
     EXIT = 0x00
     PAGE_CONTROL = 0x01
     START = 0x17
     STOP = 0x18
+    PUT_ON = 0x06
+    TAKEN_OFF = 0x07
 
 class MicStatus(IntEnum):
     ENABLE = 0x01

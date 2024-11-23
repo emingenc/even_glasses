@@ -1,6 +1,5 @@
 import asyncio
 import flet as ft
-from flet import alignment
 from even_glasses.bluetooth_manager import GlassesManager
 from even_glasses.models import NCSNotification, RSVPConfig
 from even_glasses.notification_handlers import handle_incoming_notification
@@ -9,6 +8,7 @@ import logging
 from even_glasses.models import (
     SilentModeStatus,
     BrightnessAuto,
+    GlassesWearStatus,
 )
 from even_glasses.commands import (
     send_text,
@@ -21,6 +21,7 @@ from even_glasses.commands import (
     delete_note,
     show_dashboard,
     hide_dashboard,
+    apply_glasses_wear,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -403,6 +404,9 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         note_add_button = ft.ElevatedButton(text="Add/Update Note")
         note_delete_button = ft.ElevatedButton(text="Delete Note")
 
+        # Glasses Wear Detection Controls
+        glasses_wear_switch = ft.Switch(label="Enable Glasses Wear Detection")
+        glasses_wear_button = ft.ElevatedButton(text="Apply Glasses Wear Setting")
 
         # Assemble Settings Sections
         settings_section = ft.Column(
@@ -433,6 +437,10 @@ End of demo text. Thank you for trying out the RSVP feature!"""
                 ft.Text("Note Management", size=16, weight=ft.FontWeight.BOLD),
                 ft.Row([note_number_dropdown, note_title_input, note_text_input], spacing=10),
                 ft.Row([note_add_button, note_delete_button], spacing=10),
+                ft.Divider(),
+                ft.Text("Glasses Wear Detection", size=16, weight=ft.FontWeight.BOLD),
+                glasses_wear_switch,
+                glasses_wear_button,
             ],
             spacing=10,
             expand=True,
@@ -455,6 +463,8 @@ End of demo text. Thank you for trying out the RSVP feature!"""
             note_text_input,
             note_add_button,
             note_delete_button,
+            glasses_wear_switch,    # Include the new switch
+            glasses_wear_button,    # Include the new button
         )
 
     # Create Components
@@ -507,6 +517,8 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         note_text_input,
         note_add_button,
         note_delete_button,
+        glasses_wear_switch,    # Include the new switch
+        glasses_wear_button,    # Include the new button
     ) = create_settings_section()
 
     # Update Status Function
@@ -562,6 +574,7 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         headup_angle_button.disabled = not connected
         note_add_button.disabled = not connected
         note_delete_button.disabled = not connected
+        glasses_wear_button.disabled = not connected
         page.update()
 
     # Async Event Handlers
@@ -722,6 +735,10 @@ End of demo text. Thank you for trying out the RSVP feature!"""
         await delete_note(manager, note_number)
         log_message(f"Note {note_number} deleted.")
 
+    async def apply_glasses_wear_handler(e):
+        status = GlassesWearStatus.ON if glasses_wear_switch.value else GlassesWearStatus.OFF
+        await apply_glasses_wear(manager, status)
+        log_message(f"Glasses Wear Detection set to {status.name}.")
 
     def on_keyboard(e: ft.KeyboardEvent):
         if e.key == "Enter" and e.ctrl:
@@ -743,6 +760,7 @@ End of demo text. Thank you for trying out the RSVP feature!"""
     note_delete_button.on_click = delete_note_handler
     hide_dashboard_button.on_click = hide_dashboard_handler
     show_dashboard_button.on_click = show_dashboard_handler
+    glasses_wear_button.on_click = apply_glasses_wear_handler
 
     # Organize UI into Tabs
     tabs = ft.Tabs(
