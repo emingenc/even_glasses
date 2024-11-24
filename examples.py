@@ -2,11 +2,11 @@ import asyncio
 import argparse
 import logging
 from even_glasses.bluetooth_manager import GlassesManager
-from even_glasses.commands import send_text, send_rsvp, send_notification
+from even_glasses.commands import send_text, send_rsvp, send_notification, send_image
 from even_glasses.models import RSVPConfig, NCSNotification
 from even_glasses.notification_handlers import handle_incoming_notification
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +20,7 @@ def parse_args():
     test_type.add_argument(
         "--notification", action="store_true", help="Run notification test"
     )
+    test_type.add_argument('--image', action='store_true', help='Send image')
 
     # Optional arguments for RSVP configuration
     parser.add_argument(
@@ -70,6 +71,16 @@ async def test_notification(manager: GlassesManager, notification: NCSNotificati
     await send_notification(manager, notification)
 
 
+async def test_image(manager: GlassesManager, image_path: str):
+    if not manager.left_glass or not manager.right_glass:
+        logger.error("Could not connect to glasses devices.")
+        return
+    with open(image_path, 'rb') as f:
+        image_data = f.read()
+    await send_image(manager=manager, image_data=image_data)
+    logger.info("Image sent successfully.")
+
+
 async def main():
     args = parse_args()
 
@@ -98,7 +109,9 @@ async def main():
 
         try:
             while True:
-                if args.rsvp:
+                if args.image:
+                    await test_image(manager=manager, image_path='image_2.bmp')
+                elif args.rsvp:
                     await test_rsvp(manager=manager, text=text, config=config)
                 elif args.text:
                     message = f"Test message {counter}"

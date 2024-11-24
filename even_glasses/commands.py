@@ -21,7 +21,11 @@ from even_glasses.utils import (
     construct_note_delete,
     construct_notification,
     construct_glasses_wear_command,
+    divide_image_data,
+    construct_bmp_data_packet,
+    send_data_to_glass,
 )
+import numpy as np
 
 
 def format_text_lines(text: str) -> list:
@@ -303,3 +307,25 @@ async def apply_glasses_wear(manager, status: GlassesWearStatus):
         status,
         log_message=f"Glasses wear detection set to {status.name}."
     )
+
+async def send_image(manager, image_data: bytes):
+    """Send image data to the glasses using optimized functions."""
+    # Divide image data into packets using NumPy
+    packets_array = divide_image_data(image_data)
+
+    # Preconstruct all data packets using list comprehension
+    data_packets = [
+        construct_bmp_data_packet(seq, packet_array, seq == 0)
+        for seq, packet_array in enumerate(packets_array)
+    ]
+
+    # Concatenate image data for CRC
+    full_image_array = np.concatenate(packets_array)
+
+    # Send data to left glass first
+    if manager.left_glass:
+        await send_data_to_glass(manager.left_glass, data_packets, full_image_array)
+
+    # Send data to right glass after acknowledgment from left
+    if manager.right_glass:
+        await send_data_to_glass(manager.right_glass, data_packets, full_image_array)
